@@ -61,7 +61,7 @@ def train_classification_model(
                 metrics = dict()
 
             # collecting the loss and AUC info of this mini-batch
-            all_preds.append(prob_pred_tr)
+            all_preds.append(torch.softmax(prob_pred_tr, dim=1))
             all_labels.append(labels_tr)
             loss_train += (loss.item() / n_train_loader)  # average of the loss of all mini-batches in this epoch
             callback.collect_metric(loss_all_train, loss.item())
@@ -98,7 +98,7 @@ def train_classification_model(
 
             for i_batch, batch in enumerate(dataloader_val):
 
-                prob_pred_val, labels_val, loss, _ = classifier.validation_step(batch)
+                prob_pred_val, labels_val, loss, _ = classifier.validation_step(batch, softmax=True)
 
                 all_preds.append(prob_pred_val)
                 all_labels.append(labels_val)
@@ -160,7 +160,7 @@ def test_classification_model(
 
     for i_batch, batch in enumerate(tqdm(dataloader_test)):
 
-        prob_pred_val, labels_val, loss, pred_metadata = classifier.validation_step(batch)
+        prob_pred_val, labels_val, loss, pred_metadata = classifier.validation_step(batch, softmax=True)
 
         all_preds.append(prob_pred_val)
         all_labels.append(labels_val)

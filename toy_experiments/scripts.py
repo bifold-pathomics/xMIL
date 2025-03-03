@@ -25,8 +25,8 @@ def train_model(classifier, num_classes, data_loader_train, data_loader_val, bat
             train_preds = train_preds[:, -1]
         train_labels = torch.concat(train_labels)
         for batch in data_loader_val:
-            preds, labels, loss, _ = classifier.validation_step(batch)
-            val_preds.append(torch.softmax(preds[:, :, 0], dim=-1))
+            preds, labels, loss, _ = classifier.validation_step(batch, softmax=True)
+            val_preds.append(preds[:, :, 0])
             val_labels.append(labels)
             val_loss += (loss.item() / batch_size)
         val_preds = torch.concat(val_preds)
@@ -92,7 +92,7 @@ def evaluate_explanation(xmodel, classifier, data_loader_test, explanation_type,
 
     for batch in tqdm(data_loader_test):
 
-        preds, label, _, _ = classifier.validation_step(batch)
+        preds, label, _, _ = classifier.validation_step(batch, softmax=True)
         preds, label = preds[0, :, 0], label[0, 0]
 
         all_preds.append(preds)
