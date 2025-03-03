@@ -84,12 +84,11 @@ def main():
     device = torch.device(args_user.device)
 
     # load the data_loader of interest based on the user argument args_user.dataset
-    args_dataset = {**args_model, **vars(args_user)}
     none_datasets = [f'{set_name}_subsets' for set_name in ['train', 'val', 'test'] if set_name != args_user.dataset]
     for set_name in none_datasets:
-        args_dataset[set_name] = None
-
-    _, train_loader, _, val_loader, _, test_loader = DatasetFactory.build(args_dataset, args_dataset)
+        args_model[set_name] = None
+    dataset_args = {**args_model, **vars(args_user)}
+    _, train_loader, _, val_loader, _, test_loader = DatasetFactory.build(dataset_args, args_model)
     data_loader = [loader for loader in [train_loader, val_loader, test_loader] if loader is not None][0]
 
     # define callback, model, classifier, xmodel, and xmodel_eval
@@ -116,49 +115,42 @@ def main():
         if args_user.flipping:
             torch.cuda.empty_cache()
             print(f'{args_user.approach} most relevant first ...')
-            predicted_probs, false_preds, slide_ids, skipped = \
-                xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='original',
-                                              order='morf', approach=args_user.approach,
-                                              strategy=args_user.strategy,
-                                              max_bag_size=args_user.max_bag_size, verbose=False)
+            df_results_flipping = xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='original',
+                                                                order='morf', approach=args_user.approach,
+                                                                strategy=args_user.strategy,
+                                                                max_bag_size=args_user.max_bag_size,
+                                                                min_bag_size=args_user.min_bag_size,
+                                                                verbose=False)
 
-            save_json(args_user.results_dir,
-                      f'probs_{heatmap_type}_{args_user.approach}_{args_user.dataset}', predicted_probs)
-            save_json(args_user.results_dir, f'false_preds_{args_user.approach}_{args_user.dataset}', false_preds)
-            save_json(args_user.results_dir, f'slide_ids_{args_user.approach}_{args_user.dataset}', slide_ids)
-            save_json(args_user.results_dir, f'skipped_{args_user.approach}_{args_user.dataset}', skipped)
-
+            df_results_flipping.to_csv(os.path.join(args_user.results_dir,
+                                                    f'{heatmap_type}_{args_user.approach}_patch_flipping_results.csv'))
 
         if args_user.morl_abs:
             torch.cuda.empty_cache()
             print(f'{args_user.approach} most relevant last from absolute values ...')
-            predicted_probs_morl_abs, false_preds, slide_ids, skipped = \
-                xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='abs',
-                                              order='morl', approach=args_user.approach,
-                                              strategy=args_user.strategy,
-                                              max_bag_size=args_user.max_bag_size, verbose=False)
-            save_json(args_user.results_dir,
-                      f'probs_{heatmap_type}_morl_abs_{args_user.approach}_{args_user.dataset}',
-                      predicted_probs_morl_abs)
-            save_json(args_user.results_dir, f'false_preds_{args_user.approach}_{args_user.dataset}', false_preds)
-            save_json(args_user.results_dir, f'slide_ids_{args_user.approach}_{args_user.dataset}', slide_ids)
-            save_json(args_user.results_dir, f'skipped_{args_user.approach}_{args_user.dataset}', skipped)
+            df_results_morl_abs = xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='abs',
+                                                                order='morl', approach=args_user.approach,
+                                                                strategy=args_user.strategy,
+                                                                max_bag_size=args_user.max_bag_size,
+                                                                min_bag_size=args_user.min_bag_size,
+                                                                verbose=False)
+
+            df_results_morl_abs.to_csv(os.path.join(args_user.results_dir,
+                                                    f'{heatmap_type}_{args_user.approach}_morl_abs_results.csv'))
 
     if args_user.baseline:
         torch.cuda.empty_cache()
         print(f'random baseline ... ')
         xmodel_eval = xMILEval(xmodel, classifier, heatmap_type=None, scores_df=None)
-        predicted_probs_baseline, false_preds, slide_ids, skipped = \
-            xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='random',
-                                          order='morf', approach=args_user.approach,
-                                          strategy=args_user.strategy,
-                                          max_bag_size=args_user.max_bag_size, verbose=False)
+        df_results_random = xmodel_eval.patch_drop_or_add(data_loader, attribution_strategy='random',
+                                                          order='morf', approach=args_user.approach,
+                                                          strategy=args_user.strategy,
+                                                          max_bag_size=args_user.max_bag_size,
+                                                          min_bag_size=args_user.min_bag_size,
+                                                          verbose=False)
 
-        save_json(args_user.results_dir, f'probs_baseline_{args_user.approach}_{args_user.dataset}',
-                  predicted_probs_baseline)
-        save_json(args_user.results_dir, f'false_preds_{args_user.approach}_{args_user.dataset}', false_preds)
-        save_json(args_user.results_dir, f'slide_ids_{args_user.approach}_{args_user.dataset}', slide_ids)
-        save_json(args_user.results_dir, f'skipped_{args_user.approach}_{args_user.dataset}', skipped)
+        df_results_random.to_csv(os.path.join(args_user.results_dir,
+                                              f'random_{args_user.approach}_patch_flipping_results.csv'))
 
 
 if __name__ == '__main__':

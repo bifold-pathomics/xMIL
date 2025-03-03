@@ -1,7 +1,7 @@
 
 import json
 import numpy as np
-
+import pandas as pd
 from copy import deepcopy
 from tqdm import tqdm
 import torch
@@ -94,7 +94,7 @@ class xMILEval:
             if approach == 'drop':
                 if ind_sorted.size > 0:
                     # the remaining patches - morf:=most relevant first
-                    batch_['features'] = batch['features'][..., list(ind_sorted), :]
+                    batch_['features'] = batch['features'][..., sorted(ind_sorted), :]
                     bag_size = len(ind_sorted)
                 else:
                     flag_empty_bag = True
@@ -104,7 +104,7 @@ class xMILEval:
                     flag_full_bag = True
                     bag_size = n_patches
                 else:
-                    batch_['features'] = batch['features'][..., ind_add, :]
+                    batch_['features'] = batch['features'][..., sorted(ind_add), :]
                     bag_size = len(ind_add)
 
             batch_['bag_size'] = torch.tensor([bag_size])
@@ -141,31 +141,28 @@ class xMILEval:
         :param min_bag_size: (int)
         :param verbose: (bool)
         :return:
-            predicted_probs: the list of the arrays of predicted target class probabilities of all slides
-            false_preds: the list of the slides with false predictions
-            slide_ids: the list of slide_ids of the slides in data_loader
-            skipped: the list of skipped slides due to large patch number
+            df_results: with columns slide_id (str), false_pred (bool), and predicted_probs (list)
 
         """
 
         # containers for results of each batch
-        predicted_probs = []
-        false_preds = []
-        skipped = []
-        slide_ids = []
 
-        max_bag_size_ = torch.Inf if (max_bag_size is None or max_bag_size < 0) else max_bag_size
+        max_bag_size_ = torch.inf if (max_bag_size is None or max_bag_size < 0) else max_bag_size
+
+        df_results = pd.DataFrame()
 
         for i_batch, batch in enumerate(tqdm(data_loader)):
             torch.cuda.empty_cache()
             slide_id = batch['sample_ids']['slide_id'][0]
-            slide_ids.append(slide_id)
 
             if self.scores_df is not None:
                 if slide_id not in self.scores_df['slide_id'].values:
-                    skipped.append(i_batch)
-                    predicted_probs_, false_pred_ = None, None
-                    predicted_probs.append(predicted_probs_)
+                    res_this_slide = pd.DataFrame(data={
+                        'slide_id': [slide_id],
+                        'predicted_probs': [None],
+                        'false_pred': [None],
+                    })
+                    df_results = pd.concat([df_results, res_this_slide], ignore_index=True)
                     continue
 
                 df_this_slide = self.scores_df[self.scores_df['slide_id'] == slide_id]
@@ -179,13 +176,19 @@ class xMILEval:
                     self._patch_drop_or_add_oneslide(batch, attribution_strategy=attribution_strategy,
                                                      order=order, approach=approach, strategy=strategy,
                                                      patch_scores=patch_scores, verbose=verbose)
+                res_this_slide = pd.DataFrame(data={
+                    'slide_id': [slide_id],
+                    'predicted_probs': [predicted_probs_],
+                    'false_pred': [false_pred_],
+                })
+
             else:
-                skipped.append(i_batch)
-                predicted_probs_, false_pred_ = None, None
+                res_this_slide = pd.DataFrame(data={
+                    'slide_id': [slide_id],
+                    'predicted_probs': [None],
+                    'false_pred': [None],
+                })
+            df_results = pd.concat([df_results, res_this_slide], ignore_index=True)
 
-            predicted_probs.append(predicted_probs_)
-            if false_pred_:
-                false_preds.append(i_batch)
-
-        return predicted_probs, false_preds, slide_ids, skipped
+        return df_results
 
