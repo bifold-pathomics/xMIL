@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
+import ast
+
 
 class MetadataHandler:
 
@@ -92,7 +94,7 @@ class SlideDataHandler:
             Ordered by the given slide barcodes.
         """
         print("Loading patch metadata")
-        feature_indices, patch_ids = [], []
+        feature_indices, patch_ids, positions_x, positions_y = [], [], [], []
         for idx, row in tqdm(slide_metadata.iterrows(), total=len(slide_metadata)):
             source_id, slide_id = row[["source_id", "slide_id"]]
             slide_patches = pd.read_csv(
@@ -107,7 +109,21 @@ class SlideDataHandler:
             )
             feature_indices.append(torch.tensor(slide_patches["feature_idx"].values))
             patch_ids.append(torch.tensor(slide_patches["patch_id"].values))
-        return feature_indices, patch_ids
+            positions_x.append(
+                torch.tensor(
+                    slide_patches["position_rel"]
+                    .apply(lambda x: ast.literal_eval(x)[0])
+                    .values
+                )
+            )
+            positions_y.append(
+                torch.tensor(
+                    slide_patches["position_rel"]
+                    .apply(lambda x: ast.literal_eval(x)[1])
+                    .values
+                )
+            )
+        return feature_indices, patch_ids, positions_x, positions_y
 
     @staticmethod
     def filter_patches(patch_metadata, patch_filters):
@@ -143,7 +159,7 @@ class SlideDataHandler:
     @staticmethod
     def load_features(path, feature_indices=None, patch_ids=None):
         """
-        Loads features of one slide into RAM. Pass feature_indices to only load selected features.
+        Loads features of one slide into RAM. Pass feature_indices or patch ids to only load selected features.
 
         :param path: (str) Directory where the patch features are stored.
         :param feature_indices: (torch.Tensor) Selected features indices to load (for features saved in list-style).
@@ -164,7 +180,7 @@ class SlideDataHandler:
                 }
                 vec_idx = list(map(patch_ids_to_idx.get, patch_ids.tolist()))
                 features = features[vec_idx]
-        elif os.path.exists(f"{path}.pt"):
+        elif os.path.exists(f"{path}.pt"):  # TODO implement sorting by json file
             features = torch.load(f"{path}.pt").squeeze()
             if feature_indices is not None:
                 features = features[feature_indices]
@@ -187,7 +203,14 @@ class SlideDataHandler:
         return features.float()
 
     @staticmethod
-    def sample_features(features, bag_size, patch_ids=None):
+    def sample_features(
+        features,
+        bag_size,
+        sort_sampled_patches=False,
+        patch_ids=None,
+        positions_x=None,
+        positions_y=None,
+    ):
         """
         Randomly samples a number of features from the given feature tensor. Pass patch_ids to recover the identity of
         the sampled features.
@@ -201,9 +224,17 @@ class SlideDataHandler:
             - patch_ids: (torch.Tensor) Sampled patch IDs of shape (bag_size).
         """
         idx_list = torch.randperm(features.shape[0])[:bag_size]
+
+        if sort_sampled_patches:
+            idx_list, _ = torch.sort(idx_list)
+
         features = features[idx_list]
         if patch_ids is not None:
             patch_ids = patch_ids[idx_list]
+        if positions_x is not None:
+            positions_x = positions_x[idx_list]
+        if positions_y is not None:
+            positions_y = positions_y[idx_list]
         if len(features) < bag_size:
             features = torch.cat(
                 (features, torch.zeros(bag_size - features.shape[0], features.shape[1]))
@@ -212,4 +243,83 @@ class SlideDataHandler:
                 patch_ids = torch.cat(
                     (patch_ids, torch.full((bag_size - len(patch_ids),), -1))
                 )
-        return features, patch_ids
+            if positions_x is not None:
+                positions_x = torch.cat(
+                    (positions_x, torch.full((bag_size - len(positions_x),), -1))
+                )
+            if positions_y is not None:
+                positions_y = torch.cat(
+                    (positions_y, torch.full((bag_size - len(positions_y),), -1))
+                )
+        return features, patch_ids, positions_x, positions_y
+
+
+class OmicsDataHandler:
+
+    @staticmethod
+    def load_feature_metadata(features_dirs):
+        feature_metadata = {}
+        for source_id, features_dir in enumerate(features_dirs):
+            with open(os.path.join(features_dir, f"metadata.json")) as f:
+                feature_metadata[source_id] = json.load(f)
+        return feature_metadata
+
+    @staticmethod
+    def load_features(path):
+        """
+        Loads features of one slide into RAM. Pass feature_indices to only load selected features.
+
+        :param path: (str) Directory where the patch features are stored.
+        :return: (torch.Tensor) The feature vectors of shape (num_bags, num_features).
+        """
+        if os.path.exists(f"{path}.pt"):
+            features = torch.load(f"{path}.pt", weights_only=True).squeeze()
+        elif os.path.exists(f"{path}.npy"):
+            features = torch.tensor(np.load(f"{path}.npy")).squeeze()
+        else:
+            raise ValueError(f"Couldn't find omics features file: {path}.pt")
+        return features.float()
+
+
+class SurvivalDiscretizer:
+    """Discretize the survival values based on the quartiles."""
+
+    def __init__(self, survival_col_name="survival_continuous"):
+        """
+        Initialize SurvivalDiscretizer
+        :param survival_col_name: the name of the column containing the survival values.
+        """
+        self.survival_col = survival_col_name
+
+    def compute_apply_discretizer(self, dataframe):
+        """
+        Compute the discretizing bins and also apply it to the given data frame.
+
+        :param dataframe: (DataFrame) the dataframe with the survival values in self.survival_col.
+        :return:
+        """
+        # todo: we can add q (# of bins) as the input to have more flexibility.
+        dataframe["survival_group"], discretizer_bins = pd.qcut(
+            dataframe[self.survival_col], q=4, labels=[0, 1, 2, 3], retbins=True
+        )
+
+        # in order to make sure that the least survival is 0 and there is no maximum for it:
+        discretizer_bins[0] = 0
+        discretizer_bins[-1] = np.inf
+
+        return dataframe, discretizer_bins
+
+    def apply_discretizer(self, dataframe, bins):
+        """
+        Use the given bins for discretizing the survival values.
+        :param dataframe: (DataFrame) the dataframe with the survival values in self.survival_col
+        :param bins: (numpy array) the array containing teh bins for the descritization task.
+        :return:
+        """
+        dataframe["survival_group"] = pd.cut(
+            dataframe[self.survival_col],
+            bins=bins,
+            labels=[0, 1, 2, 3],
+            include_lowest=True,
+        )
+        return dataframe
