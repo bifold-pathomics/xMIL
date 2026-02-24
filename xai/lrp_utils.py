@@ -20,6 +20,8 @@ def set_lrp_params(lrp_params):
             lrp_params["eps"] = 1e-8
         if "no_bias" not in lrp_params:
             lrp_params["no_bias"] = True
+        else:
+            lrp_params["no_bias"] = bool(lrp_params["no_bias"])
     return lrp_params
 
 
@@ -54,9 +56,6 @@ def var_data_requires_grad(x):
 
 
 def nan2zero(input_tensor):
-    """
-    helper function to replace nans with zero
-    """
     input_clone = input_tensor.clone()
     input_clone[torch.isnan(input_tensor)] = 0
     return input_clone
@@ -67,9 +66,6 @@ def apply_eps(x, eps):
 
 
 def layer_norm(detach_norm=None, dim=None, weight=1, bias=0, verbose=False):
-    """
-    helper function for using LayerNormDetach and LayerNorm based on input
-    """
     if detach_norm is None or (not detach_norm["mean"] and not detach_norm["std"]):
         return nn.LayerNorm(dim)
     if verbose:
@@ -79,10 +75,6 @@ def layer_norm(detach_norm=None, dim=None, weight=1, bias=0, verbose=False):
 
 class LayerNormDetach(nn.Module):
     """
-    class for a LayerNorm for which the mean and variance can be detached
-    detach_norm is a dictionary that defines which parameter should be  detached. for example:
-    detach_norm={'mean': False, 'std': True}
-
     (c) modified from https://github.com/AmeenAli/XAI_Transformers/blob/main/utils.py
     """
 

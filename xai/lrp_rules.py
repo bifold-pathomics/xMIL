@@ -37,6 +37,77 @@ def modified_linear_layer(layer, gamma, no_bias=True):
     return layer_new
 
 
+def lrp_gamma_rule(layer, activation, relevance, eps=1e-5, gamma=0.0, no_bias=True):
+    """
+    Based on: https://git.tu-berlin.de/gmontavon/lrp-tutorial/-/tree/main
+
+    :param layer: (nn.Linear)
+    :param activation: (#samples, #features)
+    :param relevance: (#samples, #features)
+    :param eps: (float)
+    :param gamma: (float)
+    :param no_bias: (bool)
+    :return: (#samples, #features)
+    """
+    act = activation.clone().detach().data.requires_grad_(True)
+    z = modified_linear_layer(layer, gamma, no_bias=no_bias).forward(act)
+    s = (relevance / (z + apply_eps(z, eps))).data
+    (z * s).sum().backward()
+    c = act.grad
+    res = activation * c
+    return res
+
+
+def lrp_ah_rule(attention, activation, relevance, eps=1e-5):
+    """
+    :param attention: (#samples, 1)
+    :param activation: (#samples, #features)
+    :param relevance: (#features)
+    :param eps: (float)
+    :return: (#samples, #features)
+    """
+    act = activation.clone().detach().data.requires_grad_(True)
+    z = torch.mm(torch.transpose(attention, 0, 1), act).squeeze()
+    # Epsilon to prevent numerical issues
+    s = (relevance / (z + torch.where(z >= 0, 1, -1) * eps)).data
+    (z * s).sum().backward()
+    c = act.grad
+    act.grad = None
+    act.requires_grad_(True)
+    res = (act * c).data
+    return res
+
+
+def lrp_ah_rule_naive(attention, activation, relevance, eps=1e-5):
+    """
+    :param attention: (#samples, 1)
+    :param activation: (#samples, #features)
+    :param relevance: (#features)
+    :param eps: (float)
+    :return: (#samples, #features)
+    """
+    attention = attention.squeeze()
+    x_i_p_ij = activation * attention[..., None]
+    sum_x_i_p_ij = x_i_p_ij.sum(dim=0)
+    # Epsilon to prevent numerical issues
+    sum_x_i_p_ij = sum_x_i_p_ij + torch.where(sum_x_i_p_ij >= 0, 1, -1) * eps
+    relevance = (x_i_p_ij / sum_x_i_p_ij) * relevance
+    return relevance
+
+
+def lrp_softmax(logits, explained_class):
+    """
+    logits [batch_size x n_classes]
+    softmax_scores [batch_size x n_classes]
+    explained_class [int]
+    """
+    softmax_scores = F.softmax(logits, dim=-1)
+    R_j = softmax_scores[:, explained_class][:, None]
+    relevance_logit = -logits * softmax_scores * R_j
+    relevance_logit[:, explained_class] += logits[:, explained_class] * R_j[:, 0]
+    return relevance_logit
+
+
 def check_relevance_conservation(rel_dict, verbose=True):
     if verbose:
         print("sum of relevance values at layers:")
@@ -56,7 +127,7 @@ def output_relevance(
     verbose=False,
 ):
     """
-    function for generating the output relevance. It can be the logit of the class or the contrastive relevance.
+    function for generating the output relevance. It may be the logit of the class or the contrastive relevance.
     [citation] contrastive rule implemented based on equations on page 202 of Montavon et al 2019.
 
     :param logits: logits of the classification head
@@ -66,11 +137,16 @@ def output_relevance(
     :param verbose: bool
     :return:
     """
-    if not isinstance(explained_class, int):
-        return ValueError("the explained class should be an integer.")
-
     n_classes = logits.shape[1]
-    not_explained_classes = [i for i in range(n_classes) if i != explained_class]
+    if explained_class is not None:
+        not_explained_classes = (
+            [i for i in range(n_classes) if i != explained_class]
+            if n_classes > 1
+            else []
+        )
+    else:
+        not_explained_classes = None
+
     if explained_rel == "contrastive":
         if contrastive_class is None and len(not_explained_classes) == 1:
             contrastive_class = not_explained_classes[0]
@@ -109,7 +185,27 @@ def output_relevance(
 
     elif explained_rel == "logit":
         relevance_out = logits
+        if len(not_explained_classes):
+            relevance_out[:, not_explained_classes] = 0
+
+    elif explained_rel == "softmax":
+        relevance_logit = lrp_softmax(logits, explained_class)
+        relevance_out = relevance_logit
         relevance_out[:, not_explained_classes] = 0
+
+    elif explained_rel == "sigmoid":
+        raise NotImplementedError()
+
+    elif explained_rel == "survival":
+        logits = logits.detach()
+        logits.requires_grad = True
+        hazards = torch.sigmoid(logits)
+        survivals = torch.cumprod(1 - hazards, dim=1)
+        risk_score = -(torch.sum(survivals, dim=1))
+        risk_score.backward()
+        alpha = logits.grad
+        relevance_out = logits * alpha
+
     else:
         raise ValueError(
             f"{explained_rel} is not implemented as a relevance computation method."

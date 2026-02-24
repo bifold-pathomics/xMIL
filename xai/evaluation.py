@@ -10,14 +10,30 @@ class xMILEval:
     def __init__(self, xmodel, classifier, heatmap_type, scores_df=None):
         self.xmodel = xmodel
         self.classifier = classifier
+        self.survival = getattr(classifier.model, "is_survival", False)
         self.heatmap_type = heatmap_type
         self.scores_df = scores_df
+        self.head_type = self.xmodel.head_type
+        self.softmax = True if self.head_type == "classification" else False
+
+    def _get_prediction_score(self, batch):
+        if self.survival:
+            # predicted risk scores
+            (_, _, pred_risk_scores), _, _, _ = self.classifier.validation_step(batch)
+            res = pred_risk_scores[0].item()
+        else:
+            # predicted softmax scores
+            probs, _, _, _ = self.classifier.validation_step(
+                batch, softmax=self.softmax
+            )
+            res = probs[0, self.xmodel.set_explained_class(batch)].item()
+        return res
 
     def _patch_drop_or_add_oneslide(
         self,
         batch,
         attribution_strategy="original",
-        order="morf",
+        order="descending",
         approach="drop",
         strategy="1%-of-all",
         patch_scores=None,
@@ -30,7 +46,7 @@ class xMILEval:
         :param attribution_strategy: (str) 'original' uses the patch scores from the explanation method directly
                                            'absolute' uses the absolute value of the patch scores
                                            'random' shuffles the patch scores (used for building random baseline)
-        :param order: (str) 'morf': most relevant first, 'morl': most relevant last
+        :param order: (str) 'descending'. 'ascending'
         :param approach: (str) 'drop', 'add'
         :param strategy: (str) can be either 'one-by-one', f'remaining-{P}-perc' where P is the percent of
         remaining patches to be flipped, or '{P}%-of-all' where P is the percentage of all the
@@ -47,44 +63,49 @@ class xMILEval:
         # compute or read patch scores and sort them based on the attribution strategy.
         if attribution_strategy == "random":
             patch_scores = np.random.randn(n_patches)
-        else:
+        elif attribution_strategy in ["original", "absolute"]:
             if patch_scores is None:
-                patch_scores = self.xmodel.get_heatmap(
+                patch_scores, _ = self.xmodel.get_heatmap(
                     batch, self.heatmap_type, verbose
                 )
             patch_scores = patch_scores[-n_patches:]
 
             if attribution_strategy == "absolute":
                 patch_scores = np.abs(patch_scores)
+        else:
+            NotImplementedError(
+                f"attribution_strategy={attribution_strategy} is not implemented"
+            )
 
         # sort them based on the given order
         ind_sorted = np.argsort(patch_scores)  # most relevant last
 
-        if order == "morf":  # most relevant first
+        if order == "descending":
             ind_sorted = ind_sorted[
                 ::-1
             ]  # the index of sorted patch scores in descending way
+        elif order == "ascending":
+            pass
+        else:
+            NotImplementedError(f"order={order} is not implemented.")
 
-        probs_orig, _, _, _ = self.classifier.validation_step(
-            batch, softmax=True
-        )  # the original probability
+        pred_score_orig = self._get_prediction_score(batch)
 
         batch_ = deepcopy(batch)
         batch_["features"] = torch.zeros(batch["features"].shape)
-        probs_zero, _, _, _ = self.classifier.validation_step(batch_, softmax=True)
+        pred_score_zero = self._get_prediction_score(batch_)
 
         # we keep track of the slides for which the model prediction is false
-        false_pred = probs_orig[0, batch["targets"].item()].item() <= 0.5
+        if self.head_type == "classification":
+            false_pred = pred_score_orig <= 0.5
+        else:
+            false_pred = False
 
         # collector for the target class probabilities in each iteration of patch dropping
         if approach == "drop":
-            predicted_probs = [
-                probs_orig[0, self.xmodel.set_explained_class(batch)].item()
-            ]
+            perturbed_preds = [pred_score_orig]
         elif approach == "add":
-            predicted_probs = [
-                probs_zero[0, self.xmodel.set_explained_class(batch)].item()
-            ]
+            perturbed_preds = [pred_score_zero]
 
         if "%-of-all" in strategy:
             perc = int(strategy[: strategy.index("%")])
@@ -130,25 +151,23 @@ class xMILEval:
             batch_["bag_size"] = torch.tensor([bag_size])
 
             if flag_empty_bag:
-                probs = probs_zero
+                pred_score = pred_score_zero
             elif flag_full_bag:
-                probs = probs_orig
+                pred_score = pred_score_orig
             else:
-                probs, _, _, _ = self.classifier.validation_step(batch_, softmax=True)
+                pred_score = self._get_prediction_score(batch_)
 
-            predicted_probs.append(
-                probs[0, self.xmodel.set_explained_class(batch)].item()
-            )
+            perturbed_preds.append(pred_score)
 
-        return predicted_probs, false_pred
+        return perturbed_preds, false_pred
 
     def patch_drop_or_add(
         self,
         data_loader,
         attribution_strategy="original",
-        order="morf",
+        order="descending",
         approach="drop",
-        strategy="remaining-10-perc",
+        strategy="1%-of-all",
         max_bag_size=None,
         min_bag_size=0,
         verbose=False,
@@ -160,7 +179,7 @@ class xMILEval:
         :param attribution_strategy: (str) 'original' uses the patch scores from the explanation method directly
                                            'absolute' uses the absolute value of the patch scores
                                            'random' shuffles the patch scores (used for building random baseline)
-        :param order: (str) 'morf': most relevant first, 'morl': most relevant last
+        :param order: (str) 'descending', 'ascending'
         :param approach: (str) 'drop', 'add'
         :param strategy: (str) can be either 'one-by-one' or f'remaining-{P}-perc' where P is the percent of
         remaining patches to be flipped
@@ -173,9 +192,6 @@ class xMILEval:
             df_results: with columns slide_id (str), false_pred (bool), and predicted_probs (list)
 
         """
-
-        # containers for results of each batch
-
         max_bag_size_ = (
             torch.inf if (max_bag_size is None or max_bag_size < 0) else max_bag_size
         )
@@ -183,6 +199,7 @@ class xMILEval:
         df_results = pd.DataFrame()
 
         for i_batch, batch in enumerate(tqdm(data_loader)):
+            # NOTE: the batch is supposed to be of size 1
             torch.cuda.empty_cache()
             slide_id = batch["sample_ids"]["slide_id"][0]
 
@@ -191,7 +208,7 @@ class xMILEval:
                     res_this_slide = pd.DataFrame(
                         data={
                             "slide_id": [slide_id],
-                            "predicted_probs": [None],
+                            "preds": [None],
                             "false_pred": [None],
                         }
                     )
@@ -201,17 +218,17 @@ class xMILEval:
                     continue
 
                 df_this_slide = self.scores_df[self.scores_df["slide_id"] == slide_id]
-                patch_scores = np.array(
-                    json.loads(
-                        df_this_slide[f"patch_scores_{self.heatmap_type}"].item()
-                    )
+                patch_scores = json.loads(
+                    df_this_slide[f"patch_scores_{self.heatmap_type}"].item()
                 )
-
+                while len(patch_scores) == 1 and isinstance(patch_scores[0], list):
+                    patch_scores = patch_scores[0]
+                patch_scores = np.array(patch_scores)
             else:
                 patch_scores = None
 
             if min_bag_size <= batch["bag_size"].item() <= max_bag_size_:
-                predicted_probs_, false_pred_ = self._patch_drop_or_add_oneslide(
+                preds_, false_pred_ = self._patch_drop_or_add_oneslide(
                     batch,
                     attribution_strategy=attribution_strategy,
                     order=order,
@@ -223,7 +240,7 @@ class xMILEval:
                 res_this_slide = pd.DataFrame(
                     data={
                         "slide_id": [slide_id],
-                        "predicted_probs": [predicted_probs_],
+                        "preds": [preds_],
                         "false_pred": [false_pred_],
                     }
                 )
@@ -232,10 +249,16 @@ class xMILEval:
                 res_this_slide = pd.DataFrame(
                     data={
                         "slide_id": [slide_id],
-                        "predicted_probs": [None],
+                        "preds": [None],
                         "false_pred": [None],
                     }
                 )
             df_results = pd.concat([df_results, res_this_slide], ignore_index=True)
-
         return df_results
+
+
+def patch_flipping_measures(ascending_curve, descending_curve):
+    ascending_ave = np.mean(ascending_curve)
+    descending_ave = np.mean(descending_curve)
+    symmetric_relevance_gain = np.mean(ascending_curve - descending_curve)
+    return ascending_ave, descending_ave, symmetric_relevance_gain
