@@ -10,7 +10,14 @@ from tqdm import tqdm
 class MetadataHandler:
 
     @staticmethod
-    def load_split_metadata(split_path, metadata_dirs, subsets, label_cols, modalities=None, merge_on='case_id'):
+    def load_split_metadata(
+        split_path,
+        metadata_dirs,
+        subsets,
+        label_cols,
+        modalities=None,
+        merge_on="case_id",
+    ):
         """
         Loads and fuses metadata and split information, filtered by the given subsets.
 
@@ -24,29 +31,46 @@ class MetadataHandler:
         """
         # Read split
         split = pd.read_csv(split_path)
-        split['subset'] = split['subset'].astype(str)  # for compatibility with 'subsets' arg
-        split = split[split['subset'].isin(subsets)][[merge_on, 'subset'] + label_cols]
+        split["subset"] = split["subset"].astype(
+            str
+        )  # for compatibility with 'subsets' arg
+        split = split[split["subset"].isin(subsets)][[merge_on, "subset"] + label_cols]
         # Read and merge case metadata
         case_metadata = pd.DataFrame()
         for idx, metadata_dir in enumerate(metadata_dirs):
             case_met_ = pd.read_csv(os.path.join(metadata_dir, "case_metadata.csv"))
-            case_met_.insert(0, 'source_id', idx)
-            case_metadata = pd.concat([case_metadata, case_met_], axis=0, ignore_index=True)
-        split = split.merge(case_metadata, how='inner', on=merge_on, suffixes=(None, '_ctrl'))
+            case_met_.insert(0, "source_id", idx)
+            case_metadata = pd.concat(
+                [case_metadata, case_met_], axis=0, ignore_index=True
+            )
+        split = split.merge(
+            case_metadata, how="inner", on=merge_on, suffixes=(None, "_ctrl")
+        )
         # Sanity check the given data sources
-        if 'source_id_ctrl' in split:
-            if split['source_id'].equals(split['source_id_ctrl']):
-                split = split.drop('source_id_ctrl', axis=1)
+        if "source_id_ctrl" in split:
+            if split["source_id"].equals(split["source_id_ctrl"]):
+                split = split.drop("source_id_ctrl", axis=1)
             else:
-                raise ValueError("Given data sources do not match the data sources of the split")
+                raise ValueError(
+                    "Given data sources do not match the data sources of the split"
+                )
         # Read and merge modality-specific metadata
         if modalities is not None:
             for modality in modalities:
                 modality_metadata = pd.DataFrame()
                 for idx, metadata_dir in enumerate(metadata_dirs):
-                    mod_met_ = pd.read_csv(os.path.join(metadata_dir, f"{modality}_metadata.csv"))
-                    modality_metadata = pd.concat([modality_metadata, mod_met_], axis=0, ignore_index=True)
-                split = split.merge(modality_metadata, how='inner', on=merge_on, suffixes=(None, '_ctrl'))
+                    mod_met_ = pd.read_csv(
+                        os.path.join(metadata_dir, f"{modality}_metadata.csv")
+                    )
+                    modality_metadata = pd.concat(
+                        [modality_metadata, mod_met_], axis=0, ignore_index=True
+                    )
+                split = split.merge(
+                    modality_metadata,
+                    how="inner",
+                    on=merge_on,
+                    suffixes=(None, "_ctrl"),
+                )
         return split
 
 
@@ -70,14 +94,19 @@ class SlideDataHandler:
         print("Loading patch metadata")
         feature_indices, patch_ids = [], []
         for idx, row in tqdm(slide_metadata.iterrows(), total=len(slide_metadata)):
-            source_id, slide_id = row[['source_id', 'slide_id']]
-            slide_patches = pd.read_csv(os.path.join(patches_dirs[source_id], slide_id, 'metadata/df.csv'), index_col=0)
-            slide_patches = slide_patches.sort_values('patch_id')
-            slide_patches.insert(0, 'slide_name', slide_id)
-            slide_patches.insert(1, 'feature_idx', range(len(slide_patches)))
-            slide_patches = SlideDataHandler.filter_patches(slide_patches, patch_filters)
-            feature_indices.append(torch.tensor(slide_patches['feature_idx'].values))
-            patch_ids.append(torch.tensor(slide_patches['patch_id'].values))
+            source_id, slide_id = row[["source_id", "slide_id"]]
+            slide_patches = pd.read_csv(
+                os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
+                index_col=0,
+            )
+            slide_patches = slide_patches.sort_values("patch_id")
+            slide_patches.insert(0, "slide_name", slide_id)
+            slide_patches.insert(1, "feature_idx", range(len(slide_patches)))
+            slide_patches = SlideDataHandler.filter_patches(
+                slide_patches, patch_filters
+            )
+            feature_indices.append(torch.tensor(slide_patches["feature_idx"].values))
+            patch_ids.append(torch.tensor(slide_patches["patch_id"].values))
         return feature_indices, patch_ids
 
     @staticmethod
@@ -92,13 +121,23 @@ class SlideDataHandler:
         :return: (pandas.DataFrame)
         """
         if patch_filters is not None:
-            annot_classes = patch_metadata['annotation_classes'].apply(lambda x: pd.Series(json.loads(x)))
-            if 'has_annot' in patch_filters:
-                annot_cols = [str(annot_cls) for annot_cls in patch_filters['has_annot']]
-                patch_metadata = patch_metadata[annot_classes[annot_cols].sum(axis=1) > 0]
-            if 'exclude_annot' in patch_filters:
-                annot_cols = [str(annot_cls) for annot_cls in patch_filters['exclude_annot']]
-                patch_metadata = patch_metadata[annot_classes[annot_cols].sum(axis=1) == 0]
+            annot_classes = patch_metadata["annotation_classes"].apply(
+                lambda x: pd.Series(json.loads(x))
+            )
+            if "has_annot" in patch_filters:
+                annot_cols = [
+                    str(annot_cls) for annot_cls in patch_filters["has_annot"]
+                ]
+                patch_metadata = patch_metadata[
+                    annot_classes[annot_cols].sum(axis=1) > 0
+                ]
+            if "exclude_annot" in patch_filters:
+                annot_cols = [
+                    str(annot_cls) for annot_cls in patch_filters["exclude_annot"]
+                ]
+                patch_metadata = patch_metadata[
+                    annot_classes[annot_cols].sum(axis=1) == 0
+                ]
         return patch_metadata
 
     @staticmethod
@@ -119,7 +158,10 @@ class SlideDataHandler:
             features = torch.from_numpy(np.stack(features)).squeeze()
             features = features[keys_argsort]
             if patch_ids is not None:
-                patch_ids_to_idx = {patch_id: idx for patch_id, idx in zip(keys.tolist(), keys_argsort.tolist())}
+                patch_ids_to_idx = {
+                    patch_id: idx
+                    for patch_id, idx in zip(keys.tolist(), keys_argsort.tolist())
+                }
                 vec_idx = list(map(patch_ids_to_idx.get, patch_ids.tolist()))
                 features = features[vec_idx]
         elif os.path.exists(f"{path}.pt"):
@@ -127,9 +169,19 @@ class SlideDataHandler:
             if feature_indices is not None:
                 features = features[feature_indices]
         else:
-            feature_idx_list = sorted([int(os.path.splitext(file)[0]) for file in os.listdir(path) if
-                                       file.endswith('.pt')])
-            features = torch.stack([torch.load(os.path.join(path, f"{idx}.pt")) for idx in feature_idx_list]).squeeze()
+            feature_idx_list = sorted(
+                [
+                    int(os.path.splitext(file)[0])
+                    for file in os.listdir(path)
+                    if file.endswith(".pt")
+                ]
+            )
+            features = torch.stack(
+                [
+                    torch.load(os.path.join(path, f"{idx}.pt"))
+                    for idx in feature_idx_list
+                ]
+            ).squeeze()
             if feature_indices is not None:
                 features = features[feature_indices]
         return features.float()
@@ -153,7 +205,11 @@ class SlideDataHandler:
         if patch_ids is not None:
             patch_ids = patch_ids[idx_list]
         if len(features) < bag_size:
-            features = torch.cat((features, torch.zeros(bag_size - features.shape[0], features.shape[1])))
+            features = torch.cat(
+                (features, torch.zeros(bag_size - features.shape[0], features.shape[1]))
+            )
             if patch_ids is not None:
-                patch_ids = torch.cat((patch_ids, torch.full((bag_size - len(patch_ids),), -1)))
+                patch_ids = torch.cat(
+                    (patch_ids, torch.full((bag_size - len(patch_ids),), -1))
+                )
         return features, patch_ids

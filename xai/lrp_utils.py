@@ -12,14 +12,14 @@ def set_lrp_params(lrp_params):
 
     """
     if lrp_params is None:
-        lrp_params = {'gamma': 0, 'eps': 1e-8, 'no_bias': True}
+        lrp_params = {"gamma": 0, "eps": 1e-8, "no_bias": True}
     else:
-        if 'gamma' not in lrp_params:
-            lrp_params['gamma'] = 0
-        if 'eps' not in lrp_params:
-            lrp_params['eps'] = 1e-8
-        if 'no_bias' not in lrp_params:
-            lrp_params['no_bias'] = True
+        if "gamma" not in lrp_params:
+            lrp_params["gamma"] = 0
+        if "eps" not in lrp_params:
+            lrp_params["eps"] = 1e-8
+        if "no_bias" not in lrp_params:
+            lrp_params["no_bias"] = True
     return lrp_params
 
 
@@ -33,12 +33,12 @@ def set_detach_norm(detach_norm):
 
     """
     if detach_norm is None:
-        detach_norm = {'mean': False, 'std': True}
+        detach_norm = {"mean": False, "std": True}
     else:
-        if 'mean' not in detach_norm:
-            detach_norm['mean'] = False
-        if 'std' not in detach_norm:
-            detach_norm['std'] = True
+        if "mean" not in detach_norm:
+            detach_norm["mean"] = False
+        if "std" not in detach_norm:
+            detach_norm["std"] = True
     return detach_norm
 
 
@@ -70,10 +70,10 @@ def layer_norm(detach_norm=None, dim=None, weight=1, bias=0, verbose=False):
     """
     helper function for using LayerNormDetach and LayerNorm based on input
     """
-    if detach_norm is None or (not detach_norm['mean'] and not detach_norm['std']):
+    if detach_norm is None or (not detach_norm["mean"] and not detach_norm["std"]):
         return nn.LayerNorm(dim)
     if verbose:
-        print(f'A detachment is done at the layer norm: {detach_norm}!')
+        print(f"A detachment is done at the layer norm: {detach_norm}!")
     return LayerNormDetach(detach_norm=detach_norm, weight=weight, bias=bias)
 
 
@@ -85,6 +85,7 @@ class LayerNormDetach(nn.Module):
 
     (c) modified from https://github.com/AmeenAli/XAI_Transformers/blob/main/utils.py
     """
+
     def __init__(self, detach_norm, weight=1, bias=0, eps=1e-5):
         super().__init__()
         self.detach_norm = detach_norm
@@ -95,8 +96,10 @@ class LayerNormDetach(nn.Module):
     def forward(self, x):
         x_mean = x.mean(dim=-1, keepdim=True)
         x_std = x.std(dim=-1, keepdim=True)
-        if self.detach_norm['mean']:
+        if self.detach_norm["mean"]:
             x_mean = x_mean.detach()
-        if self.detach_norm['std']:
+        if self.detach_norm["std"]:
             x_std = x_std.detach()
-        return (x - x_mean) / (x_std + apply_eps(x_std, self.eps)) * self.weight + self.bias
+        return (x - x_mean) / (
+            x_std + apply_eps(x_std, self.eps)
+        ) * self.weight + self.bias

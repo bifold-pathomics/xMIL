@@ -10,18 +10,26 @@ from splits import get_label_mapping, split
 def get_args():
     parser = argparse.ArgumentParser()
     # Loading and saving
-    parser.add_argument('--metadata-paths', type=str, nargs='+', required=True)
-    parser.add_argument('--target-path', type=str, required=True)
+    parser.add_argument("--metadata-paths", type=str, nargs="+", required=True)
+    parser.add_argument("--target-path", type=str, required=True)
     # Splitting args
-    parser.add_argument('--split-by', type=str, required=True)
-    parser.add_argument('--data-filters', default=None)
-    parser.add_argument('--target', type=str, default=None)
-    parser.add_argument('--groups', type=str, default=None)
-    parser.add_argument('--strategy', type=str, default='train_test',
-                        choices=['train_test', 'train_val_test', 'cross_validation'])
-    parser.add_argument('--ratios', default=None, help="Dict for the split ratios for the chosen strategy")
-    parser.add_argument('--label-threshold', type=float, default=0.5)
-    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument("--split-by", type=str, required=True)
+    parser.add_argument("--data-filters", default=None)
+    parser.add_argument("--target", type=str, default=None)
+    parser.add_argument("--groups", type=str, default=None)
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        default="train_test",
+        choices=["train_test", "train_val_test", "cross_validation"],
+    )
+    parser.add_argument(
+        "--ratios",
+        default=None,
+        help="Dict for the split ratios for the chosen strategy",
+    )
+    parser.add_argument("--label-threshold", type=float, default=0.5)
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     # Parse dict-like args
     if args.data_filters is not None:
@@ -46,17 +54,26 @@ def main():
     # Read and merge metadata
     metadata = pd.DataFrame()
     for idx, metadata_path in enumerate(args.metadata_paths):
-        metadata = pd.concat([metadata, pd.read_csv(metadata_path)], axis=0, ignore_index=True)
+        metadata = pd.concat(
+            [metadata, pd.read_csv(metadata_path)], axis=0, ignore_index=True
+        )
     # Filter metadata
     if args.data_filters is not None:
         for key, vals in args.data_filters.items():
             metadata = metadata[metadata[key].isin(vals)]
     # Compute and save split
     split_df = split(
-        metadata=metadata, split_by=args.split_by, target=args.target, label_mapping=label_mapping, groups=args.groups,
-        strategy=args.strategy, ratios=args.ratios, seed=args.seed)
+        metadata=metadata,
+        split_by=args.split_by,
+        target=args.target,
+        label_mapping=label_mapping,
+        groups=args.groups,
+        strategy=args.strategy,
+        ratios=args.ratios,
+        seed=args.seed,
+    )
     split_df.to_csv(args.target_path, index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

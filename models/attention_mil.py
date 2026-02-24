@@ -13,8 +13,19 @@ from xai.explanation import xMIL
 
 class AttentionMILModel(nn.Module):
 
-    def __init__(self, input_dim, num_classes=None, features_dim=256, inner_attention_dim=128, dropout=None,
-                 dropout_strategy='features', num_layers=1, n_out_layers=0, bias=True, device='cpu'):
+    def __init__(
+        self,
+        input_dim,
+        num_classes=None,
+        features_dim=256,
+        inner_attention_dim=128,
+        dropout=None,
+        dropout_strategy="features",
+        num_layers=1,
+        n_out_layers=0,
+        bias=True,
+        device="cpu",
+    ):
         """
         :param input_dim: (int) Dimension of the incoming feature vectors.
         :param num_classes: (int) Number of classes to predict.
@@ -37,40 +48,50 @@ class AttentionMILModel(nn.Module):
         self.inner_attention_dim = inner_attention_dim
         self.num_layers = num_layers
         # Set up model
-        layer1 = [nn.Sequential(
-            nn.Linear(self.input_dim, self.features_dim),
-            nn.ReLU())]
+        layer1 = [
+            nn.Sequential(nn.Linear(self.input_dim, self.features_dim), nn.ReLU())
+        ]
 
-        layer2_onwards = [nn.Sequential(
-            nn.Linear(self.features_dim, self.features_dim, bias=bias),
-            nn.ReLU(),
-        ) for _ in range(num_layers-1)]
+        layer2_onwards = [
+            nn.Sequential(
+                nn.Linear(self.features_dim, self.features_dim, bias=bias),
+                nn.ReLU(),
+            )
+            for _ in range(num_layers - 1)
+        ]
 
         self.linear_layers = nn.Sequential(*(layer1 + layer2_onwards))
 
         self.attention = nn.Sequential(
             nn.Linear(self.features_dim, self.inner_attention_dim),
             nn.Tanh(),
-            nn.Linear(self.inner_attention_dim, 1)
+            nn.Linear(self.inner_attention_dim, 1),
         )
-        out_layers = [nn.Sequential(
-            nn.Linear(self.features_dim, self.features_dim, bias=bias),
-            nn.ReLU(),
-        ) for _ in range(n_out_layers)]
+        out_layers = [
+            nn.Sequential(
+                nn.Linear(self.features_dim, self.features_dim, bias=bias),
+                nn.ReLU(),
+            )
+            for _ in range(n_out_layers)
+        ]
         self.out_layers = nn.Sequential(*out_layers)
 
         self.classifier = nn.Linear(self.features_dim, self.n_classes, bias=bias)
 
         # Set up dropout layers
-        self.feature_dropout, self.linear_dropout, self.classifier_dropout = None, None, None
+        self.feature_dropout, self.linear_dropout, self.classifier_dropout = (
+            None,
+            None,
+            None,
+        )
         if dropout is not None:
-            if dropout_strategy == 'features':
+            if dropout_strategy == "features":
                 self.feature_dropout = nn.Dropout(dropout)
-            elif dropout_strategy == 'all':
+            elif dropout_strategy == "all":
                 self.feature_dropout = nn.Dropout(dropout)
                 self.linear_dropout = nn.Dropout(dropout)
                 self.classifier_dropout = nn.Dropout(dropout)
-            elif dropout_strategy == 'last':
+            elif dropout_strategy == "last":
                 self.classifier_dropout = nn.Dropout(dropout)
 
         self.device = device
@@ -81,7 +102,9 @@ class AttentionMILModel(nn.Module):
     def softmax_scores_bag(scores, bag_sizes):
         scores_softmax = []
         for idx in range(len(bag_sizes)):
-            bag_attention = torch.softmax(scores[bag_sizes[:idx].sum():bag_sizes[:idx + 1].sum()], dim=0)
+            bag_attention = torch.softmax(
+                scores[bag_sizes[:idx].sum() : bag_sizes[: idx + 1].sum()], dim=0
+            )
             scores_softmax.append(bag_attention)
         return torch.concat(scores_softmax, dim=0)
 
@@ -95,16 +118,23 @@ class AttentionMILModel(nn.Module):
 
         bag_embeddings = []
         for idx in range(len(bag_sizes)):
-            bag_features = features[bag_sizes[:idx].sum():bag_sizes[:idx+1].sum()]
-            bag_attention = torch.softmax(attention_scores[bag_sizes[:idx].sum():bag_sizes[:idx+1].sum()], dim=0)
-            bag_embeddings.append(torch.mm(torch.transpose(bag_attention, 0, 1), bag_features))
+            bag_features = features[bag_sizes[:idx].sum() : bag_sizes[: idx + 1].sum()]
+            bag_attention = torch.softmax(
+                attention_scores[bag_sizes[:idx].sum() : bag_sizes[: idx + 1].sum()],
+                dim=0,
+            )
+            bag_embeddings.append(
+                torch.mm(torch.transpose(bag_attention, 0, 1), bag_features)
+            )
 
         return torch.concat(bag_embeddings, dim=0)
 
     def aggregate_patch_scores(self, patch_scores, bag_sizes):
         res = []
         for idx in range(len(bag_sizes)):
-            patches_probs = patch_scores[bag_sizes[:idx].sum():bag_sizes[:idx + 1].sum()]  # n_patch x n_class
+            patches_probs = patch_scores[
+                bag_sizes[:idx].sum() : bag_sizes[: idx + 1].sum()
+            ]  # n_patch x n_class
             bag_probs = patches_probs.sum(dim=0, keepdims=True)  # 1 x n_class
             res.append(bag_probs)
         return torch.concat(res, dim=0)
@@ -126,7 +156,9 @@ class AttentionMILModel(nn.Module):
         # Apply attention aggregation
         self.attention_scores = self.attention(features)
 
-        bag_embeddings = self.bag_aggregation(features, self.attention_scores, bag_sizes)
+        bag_embeddings = self.bag_aggregation(
+            features, self.attention_scores, bag_sizes
+        )
 
         if self.out_layers:
             bag_embeddings = self.out_layers(bag_embeddings)
@@ -142,7 +174,9 @@ class AttentionMILModel(nn.Module):
     def forward_fn(self, features, bag_sizes):
         return self.forward(features, bag_sizes)
 
-    def activations(self, features, bag_sizes, detach_attn=True, lrp_params=None, verbose=False):
+    def activations(
+        self, features, bag_sizes, detach_attn=True, lrp_params=None, verbose=False
+    ):
         """
         method for collecting the activations for the explanation stage.
 
@@ -162,7 +196,7 @@ class AttentionMILModel(nn.Module):
                 (see xai.lrp_utils.var_data_requires_grad). 'input-p' is the output of the xforward method of the
                 previous layer.
 
-       """
+        """
 
         lrp_params = set_lrp_params(lrp_params)
         activations = {}
@@ -173,10 +207,15 @@ class AttentionMILModel(nn.Module):
         # Apply pre-aggregation layers
         for i_block, block in enumerate(self.linear_layers):
             linear_input_data = var_data_requires_grad(linear_input)
-            activations[f'fc1-{i_block}'] = {'input': linear_input, 'input-data': linear_input_data,
-                                             'input-p': linear_input_p}
+            activations[f"fc1-{i_block}"] = {
+                "input": linear_input,
+                "input-data": linear_input_data,
+                "input-p": linear_input_p,
+            }
             fc = block[0]
-            fc_ = modified_linear_layer(fc, lrp_params['gamma'], no_bias=lrp_params['no_bias'])
+            fc_ = modified_linear_layer(
+                fc, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+            )
             block_out = F.relu(fc(linear_input_data))
             block_out_p = fc_(linear_input_data)
 
@@ -189,14 +228,20 @@ class AttentionMILModel(nn.Module):
         if detach_attn:
             self.attention_scores = self.attention_scores.detach()
             if verbose:
-                print('attention values were detached from the computational graph!')
+                print("attention values were detached from the computational graph!")
 
         #  Apply attention aggregation
         agg_input = linear_input
         agg_input_p = linear_input_p
         agg_input_data = var_data_requires_grad(agg_input)
-        activations['aggregation'] = {'input': agg_input, 'input-data': agg_input_data, 'input-p': agg_input_p}
-        agg_output = self.bag_aggregation(agg_input_data, self.attention_scores, bag_sizes)
+        activations["aggregation"] = {
+            "input": agg_input,
+            "input-data": agg_input_data,
+            "input-p": agg_input_p,
+        }
+        agg_output = self.bag_aggregation(
+            agg_input_data, self.attention_scores, bag_sizes
+        )
 
         #  relevance for Additive model: apply linear layers after attention scaling
         out_layer_input = agg_output
@@ -205,11 +250,15 @@ class AttentionMILModel(nn.Module):
             fc = layer[0]
 
             out_layer_input_data = var_data_requires_grad(out_layer_input)
-            activations[f'layerout-{i_layer}'] = {'input': out_layer_input,
-                                                  'input-data': out_layer_input_data,
-                                                  'input-p': out_layer_input_p}
+            activations[f"layerout-{i_layer}"] = {
+                "input": out_layer_input,
+                "input-data": out_layer_input_data,
+                "input-p": out_layer_input_p,
+            }
 
-            fc_ = modified_linear_layer(fc, lrp_params['gamma'], no_bias=lrp_params['no_bias'])
+            fc_ = modified_linear_layer(
+                fc, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+            )
             mlp_out = F.relu(fc(out_layer_input_data))
             mlp_out_p = fc_(out_layer_input_data)
 
@@ -220,12 +269,17 @@ class AttentionMILModel(nn.Module):
         classifier_input = out_layer_input
         classifier_input_p = out_layer_input_p
         classifier_input_data = var_data_requires_grad(classifier_input)
-        activations[f'classifier'] = {'input': classifier_input, 'input-data': classifier_input_data,
-                                      'input-p': classifier_input_p}
+        activations[f"classifier"] = {
+            "input": classifier_input,
+            "input-data": classifier_input_data,
+            "input-p": classifier_input_p,
+        }
         logits = self.classifier(classifier_input_data)
-        classifier_ = modified_linear_layer(self.classifier, lrp_params['gamma'], no_bias=lrp_params['no_bias'])
+        classifier_ = modified_linear_layer(
+            self.classifier, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+        )
         logits_p = classifier_(classifier_input_data)
-        activations['out'] = {'input': logits, 'input-p': logits_p}
+        activations["out"] = {"input": logits, "input-p": logits_p}
 
         return activations
 
@@ -243,8 +297,15 @@ class xAttentionMIL(xMIL):
     method get_heatmap(batch, heatmap_type) from the base class can be used to get the heatmap of desired method.
     """
 
-    def __init__(self, model, explained_class=None, explained_rel='logit', lrp_params=None, contrastive_class=None,
-                 detach_attn=True):
+    def __init__(
+        self,
+        model,
+        explained_class=None,
+        explained_rel="logit",
+        lrp_params=None,
+        contrastive_class=None,
+        detach_attn=True,
+    ):
         super().__init__()
         self.model = model
         self.device = model.device
@@ -260,35 +321,57 @@ class xAttentionMIL(xMIL):
         softmaxed within each slide before returning themn.
         """
         self.model.eval()
-        features, bag_sizes = batch['features'].to(self.device), batch['bag_size'].to(self.device)
+        features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
+            self.device
+        )
         self.model.forward(features, bag_sizes)
-        attention_scores = self.model.softmax_scores_bag(self.model.attention_scores, bag_sizes)
+        attention_scores = self.model.softmax_scores_bag(
+            self.model.attention_scores, bag_sizes
+        )
         return attention_scores.detach().cpu().numpy().squeeze()
 
     def explain_lrp(self, batch, verbose=False):
         if self.model.classifier is None:
             raise NotImplementedError()
 
-        features, bag_sizes = batch['features'].to(self.device), batch['bag_size'].to(self.device)
+        features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
+            self.device
+        )
 
         self.model.eval()
         activations = self.model.activations(
-            features, bag_sizes, detach_attn=self.detach_attn, lrp_params=self.lrp_params, verbose=verbose)
+            features,
+            bag_sizes,
+            detach_attn=self.detach_attn,
+            lrp_params=self.lrp_params,
+            verbose=verbose,
+        )
         bag_relevance, R = self.lrp_gi(
-            activations, self.set_explained_class(batch), self.contrastive_class, self.explained_rel, self.lrp_params['eps'],
-            verbose)
+            activations,
+            self.set_explained_class(batch),
+            self.contrastive_class,
+            self.explained_rel,
+            self.lrp_params["eps"],
+            verbose,
+        )
         return bag_relevance, R, activations
 
     def explain_gi(self, batch):
         self.model.eval()
-        features, bag_sizes = batch['features'].to(self.device), batch['bag_size'].to(self.device)
+        features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
+            self.device
+        )
         features.requires_grad_(True)
         logits = self.model(features, bag_sizes)
-        return self.gradient_x_input(features, logits[0, self.set_explained_class(batch)])
+        return self.gradient_x_input(
+            features, logits[0, self.set_explained_class(batch)]
+        )
 
     def explain_squared_grad(self, batch):
         self.model.eval()
-        features, bag_sizes = batch['features'].to(self.device), batch['bag_size'].to(self.device)
+        features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
+            self.device
+        )
         features.requires_grad_(True)
         logits = self.model(features, bag_sizes)
         return self.squared_grad(features, logits[0, self.set_explained_class(batch)])
@@ -300,18 +383,23 @@ class xAttentionMIL(xMIL):
 
         self.model.eval()
         explained_class = self.set_explained_class(batch)
-        return self.perturbation_scores(batch, perturbation_method, forward_fn, explained_class, self.explained_rel)
+        return self.perturbation_scores(
+            batch, perturbation_method, forward_fn, explained_class, self.explained_rel
+        )
 
     def explain_integrated_gradients(self, batch):
         def forward_fn_(bag_sizes_, features_):
             return self.model(features_, bag_sizes_)
 
         self.model.eval()
-        features, bag_sizes = batch['features'].to(self.device), batch['bag_size'].to(self.device)
+        features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
+            self.device
+        )
         forward_ = partial(forward_fn_, bag_sizes)
 
         ig = IntegratedGradients(forward_)
-        explanations = self.integrated_gradients(ig, features, self.set_explained_class(batch))
+        explanations = self.integrated_gradients(
+            ig, features, self.set_explained_class(batch)
+        )
 
         return explanations
-
