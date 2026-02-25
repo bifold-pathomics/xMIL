@@ -1,6 +1,5 @@
 """
-(c) Adaptation of the paper: https://arxiv.org/abs/2206.01794.
-most parts of the code (except class xAdditiveMIL) taken from supplementary materials from
+(c) Adaptation of the paper: https://arxiv.org/abs/2206.01794. Code taken from supplementary materials from
 https://openreview.net/forum?id=5dHQyEcYDgA.
 """
 
@@ -42,10 +41,13 @@ class DefaultMILGraph(torch.nn.Module):
         super().__init__()
         self.classifier = classifier
         self.pointer = pointer
-        self.n_classes = num_classes
+        self.head_dim = num_classes
+        self.num_classes = num_classes
         self.patch_logits = None
         self.attention_scores = None
         self.device = device
+        self.num_targets = 1
+        self.is_survival = False  # todo: this argument is just a placeholder to match the other models' structures.
 
     def forward_fn(self, features, bag_sizes):
         return self.forward(features, bag_sizes)

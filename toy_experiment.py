@@ -7,11 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 
-from toy_experiments.datasets import (
-    get_number_mil_dataset,
-    bag_collate_fn,
-    get_MNIST_features,
-)
+from toy_experiments.datasets import get_number_mil_dataset, bag_collate_fn
 from toy_experiments.scripts import train_model, evaluate_explanation
 from toy_experiments.models import get_model_and_classifier, get_xmodel
 
@@ -35,15 +31,8 @@ def get_args():
     parser.add_argument(
         "--features-type",
         type=str,
-        default="mnist_resnet18",
-        choices=["onehot", "mnist_resnet18"],
-    )
-    parser.add_argument(
-        "--features-path",
-        type=str,
-        default=None,
-        help="Path to pre-computed feature vectors. If the feature vectors have not been pre-computed,"
-        "they will be extracted and saved to this path.",
+        default="mnist",
+        choices=["onehot", "mnist", "mnist_resnet18"],
     )
     parser.add_argument("--num-bags-train", type=int, default=2000)
     parser.add_argument("--num-bags-val", type=int, default=500)
@@ -99,22 +88,6 @@ def main():
 
     device = torch.device(args.device)
 
-    # Load MNIST data and extract features if not already present
-    if args.features_type == "mnist_resnet18":
-        if not os.path.exists(args.features_path):
-            os.makedirs(args.features_path)
-        if not all(
-            [f"class_{idx}.pt" in os.listdir(args.features_path) for idx in range(10)]
-        ):
-            print(
-                f"No or not all MNIST features found at: {args.features_path}. Starting feature extraction."
-            )
-            mnist_features = get_MNIST_features(args.features_path, download=True)
-            for idx in range(10):
-                mnist_class_path = os.path.join(args.features_path, f"class_{idx}.pt")
-                if not os.path.exists(mnist_class_path):
-                    torch.save(mnist_features[idx], mnist_class_path)
-
     # Set up datasets
     dataset_train = get_number_mil_dataset(
         dataset_type=args.dataset_type,
@@ -125,7 +98,6 @@ def main():
         sampling=args.sampling,
         noise=args.noise,
         threshold=args.threshold,
-        features_path=args.features_path,
     )
     dataset_val = get_number_mil_dataset(
         dataset_type=args.dataset_type,
@@ -136,7 +108,6 @@ def main():
         sampling=args.sampling,
         noise=args.noise,
         threshold=args.threshold,
-        features_path=args.features_path,
     )
     dataset_test = get_number_mil_dataset(
         dataset_type=args.dataset_type,
@@ -147,7 +118,6 @@ def main():
         sampling=args.sampling,
         noise=args.noise,
         threshold=args.threshold,
-        features_path=args.features_path,
     )
     collate_fn = (
         bag_collate_fn if args.model_type in ["attention_mil", "additive_mil"] else None
@@ -167,8 +137,9 @@ def main():
 
         model, classifier = get_model_and_classifier(
             model_type=args.model_type,
+            features_type=args.features_type,
             num_features=dataset_train.num_features,
-            num_classes=dataset_train.num_classes,
+            head_dim=dataset_train.num_classes,
             model_dims=args.model_dims,
             dropout=args.dropout,
             n_out_layers=args.n_out_layers,
@@ -179,7 +150,7 @@ def main():
 
         train_metrics = train_model(
             classifier=classifier,
-            num_classes=dataset_train.num_classes,
+            head_dim=dataset_train.num_classes,
             data_loader_train=data_loader_train,
             data_loader_val=data_loader_val,
             batch_size=args.batch_size,
@@ -194,13 +165,16 @@ def main():
 
         test_metrics = {}
         for explanation_type in args.explanation_methods:
-            print(f"Evaluating {explanation_type}:")
-            xmodel = get_xmodel(
-                model_type=args.model_type,
-                explanation_type=explanation_type,
-                model=model,
-                detach_pe=args.detach_pe,
-            )
+            if explanation_type is not None:
+                print(f"Evaluating {explanation_type}:")
+                xmodel = get_xmodel(
+                    model_type=args.model_type,
+                    features_type=args.features_type,
+                    model=model,
+                    detach_pe=args.detach_pe,
+                )
+            else:
+                xmodel = None
             all_labels, all_preds, scores = evaluate_explanation(
                 xmodel=xmodel,
                 classifier=classifier,
@@ -217,9 +191,10 @@ def main():
                 multi_class="ovr",
             )
             test_metrics["bags"] = len(scores["auroc_pos"])
-            test_metrics[explanation_type] = {
-                key: val.mean().item() for key, val in scores.items()
-            }
+            if explanation_type is not None:
+                test_metrics[explanation_type] = {
+                    key: val.mean().item() for key, val in scores.items()
+                }
         all_metrics = {**train_metrics, "test": test_metrics}
         all_results.append(all_metrics)
         print(json.dumps(all_metrics, indent=4))

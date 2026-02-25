@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from captum.attr import IntegratedGradients
 
-from models.utils import Classifier
+from models.utils import BlockLinear
 from xai.lrp_rules import modified_linear_layer
 from xai.lrp_utils import var_data_requires_grad, set_lrp_params
 from xai.explanation import xMIL
@@ -16,7 +16,7 @@ class AttentionMILModel(nn.Module):
     def __init__(
         self,
         input_dim,
-        num_classes=None,
+        head_dim=None,
         features_dim=256,
         inner_attention_dim=128,
         dropout=None,
@@ -24,37 +24,49 @@ class AttentionMILModel(nn.Module):
         num_layers=1,
         n_out_layers=0,
         bias=True,
+        num_encoders=1,
+        is_survival=False,
         device="cpu",
     ):
         """
         :param input_dim: (int) Dimension of the incoming feature vectors.
-        :param num_classes: (int) Number of classes to predict.
+        :param head_dim: (int) output dimension of the last linear layer. In a classification task, it is number of classes
+            If None, the module will not have a last linear head, and the output dimension will be features_dim.
         :param features_dim: (int) Output dimension of the linear layer applied to the feature vectors.
         :param inner_attention_dim: (int) Inner hidden dimension of the 2-layer attention mechanism.
         :param dropout: (float) Fraction of neurons to drop per targeted layer. None to apply no dropout.
         :param dropout_strategy: (str) Which layers to apply dropout to.
         :param num_layers: (int) number of linear layers applied to feature vectors.
-        :param n_out_layers: (int) relevant for additive model. number of linear layers applied before the classifier
+        :param n_out_layers: (int) number of linear layers applied before the classifier.
         to the features scaled by the attention values.
         :param bias: (bool) if False then the bias term is omited from all linear layers. default: True
+        :param num_encoders: (int) number of encoders at the first layer
+        :param is_survival: (bool) defines whether it is a model for survival analysis
         :param device: the operating device
         """
         super(AttentionMILModel, self).__init__()
         # Save args
         self.bias = bias
         self.input_dim = input_dim
-        self.n_classes = num_classes
+        self.head_dim = head_dim
         self.features_dim = features_dim
         self.inner_attention_dim = inner_attention_dim
         self.num_layers = num_layers
+        self.num_encoders = num_encoders
+        self.is_survival = is_survival
         # Set up model
+        if self.num_encoders == 1:
+            encoder_layer = nn.Linear
+        else:
+            encoder_layer = partial(BlockLinear, num_blocks=num_encoders, flatten=True)
+
         layer1 = [
-            nn.Sequential(nn.Linear(self.input_dim, self.features_dim), nn.ReLU())
+            nn.Sequential(encoder_layer(self.input_dim, self.features_dim), nn.ReLU())
         ]
 
         layer2_onwards = [
             nn.Sequential(
-                nn.Linear(self.features_dim, self.features_dim, bias=bias),
+                encoder_layer(self.features_dim, self.features_dim, bias=bias),
                 nn.ReLU(),
             )
             for _ in range(num_layers - 1)
@@ -76,7 +88,10 @@ class AttentionMILModel(nn.Module):
         ]
         self.out_layers = nn.Sequential(*out_layers)
 
-        self.classifier = nn.Linear(self.features_dim, self.n_classes, bias=bias)
+        if self.head_dim is not None:
+            self.linear_head = nn.Linear(self.features_dim, self.head_dim, bias=bias)
+        else:
+            self.linear_head = None
 
         # Set up dropout layers
         self.feature_dropout, self.linear_dropout, self.classifier_dropout = (
@@ -95,7 +110,7 @@ class AttentionMILModel(nn.Module):
                 self.classifier_dropout = nn.Dropout(dropout)
 
         self.device = device
-
+        # Set up data structures for explanations
         self.attention_scores = None
 
     @staticmethod
@@ -129,16 +144,6 @@ class AttentionMILModel(nn.Module):
 
         return torch.concat(bag_embeddings, dim=0)
 
-    def aggregate_patch_scores(self, patch_scores, bag_sizes):
-        res = []
-        for idx in range(len(bag_sizes)):
-            patches_probs = patch_scores[
-                bag_sizes[:idx].sum() : bag_sizes[: idx + 1].sum()
-            ]  # n_patch x n_class
-            bag_probs = patches_probs.sum(dim=0, keepdims=True)  # 1 x n_class
-            res.append(bag_probs)
-        return torch.concat(res, dim=0)
-
     def forward(self, features, bag_sizes):
         """
         :param features: (#patches, input_dim)
@@ -155,7 +160,6 @@ class AttentionMILModel(nn.Module):
 
         # Apply attention aggregation
         self.attention_scores = self.attention(features)
-
         bag_embeddings = self.bag_aggregation(
             features, self.attention_scores, bag_sizes
         )
@@ -167,12 +171,33 @@ class AttentionMILModel(nn.Module):
         if self.classifier_dropout is not None:
             bag_embeddings = self.classifier_dropout(bag_embeddings)
 
-        res = self.classifier(bag_embeddings)
+        if self.linear_head is not None:
+            res = self.linear_head(bag_embeddings)
+        else:
+            res = bag_embeddings
 
-        return res
+        if self.is_survival:
+            hazards = torch.sigmoid(res)
+            survivals = torch.cumprod(1 - hazards, dim=1)
+            risk_score = -(torch.sum(survivals, dim=1))
+            return hazards, survivals, risk_score
+        else:
+            return res
 
     def forward_fn(self, features, bag_sizes):
         return self.forward(features, bag_sizes)
+
+    def set_linear_head(self, linear_layer=None):
+        self.linear_head = linear_layer
+
+    def get_linear_head(self):
+        return self.linear_head
+
+    def get_out_layers(self):
+        return self.out_layers
+
+    def set_out_layers(self, out_layers):
+        self.out_layers = out_layers
 
     def activations(
         self, features, bag_sizes, detach_attn=True, lrp_params=None, verbose=False
@@ -197,6 +222,8 @@ class AttentionMILModel(nn.Module):
                 previous layer.
 
         """
+        if self.num_encoders > 1:
+            raise ValueError("Cannot compute LRP for BlockLinear layer yet.")
 
         lrp_params = set_lrp_params(lrp_params)
         activations = {}
@@ -239,11 +266,12 @@ class AttentionMILModel(nn.Module):
             "input-data": agg_input_data,
             "input-p": agg_input_p,
         }
+
         agg_output = self.bag_aggregation(
             agg_input_data, self.attention_scores, bag_sizes
         )
 
-        #  relevance for Additive model: apply linear layers after attention scaling
+        #  apply linear layers after attention scaling
         out_layer_input = agg_output
         out_layer_input_p = None
         for i_layer, layer in enumerate(self.out_layers):
@@ -266,47 +294,44 @@ class AttentionMILModel(nn.Module):
             out_layer_input_p = mlp_out_p
 
         # apply classifier
-        classifier_input = out_layer_input
-        classifier_input_p = out_layer_input_p
-        classifier_input_data = var_data_requires_grad(classifier_input)
-        activations[f"classifier"] = {
-            "input": classifier_input,
-            "input-data": classifier_input_data,
-            "input-p": classifier_input_p,
-        }
-        logits = self.classifier(classifier_input_data)
-        classifier_ = modified_linear_layer(
-            self.classifier, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
-        )
-        logits_p = classifier_(classifier_input_data)
-        activations["out"] = {"input": logits, "input-p": logits_p}
+        if self.linear_head is not None:
+            classifier_input = out_layer_input
+            classifier_input_p = out_layer_input_p
+            classifier_input_data = var_data_requires_grad(classifier_input)
+            activations[f"classifier"] = {
+                "input": classifier_input,
+                "input-data": classifier_input_data,
+                "input-p": classifier_input_p,
+            }
+            logits = self.linear_head(classifier_input_data)
+            classifier_ = modified_linear_layer(
+                self.linear_head, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+            )
+            logits_p = classifier_(classifier_input_data)
+
+            activations["out"] = {"input": logits, "input-p": logits_p}
+        else:
+            activations["out"] = {
+                "input": out_layer_input,
+                "input-p": out_layer_input_p,
+            }
 
         return activations
 
 
 class xAttentionMIL(xMIL):
-    """
-    class for generating explanation heatmaps for a given AttentionMILModel model and an input.
-    possible methods are:
-                        attention: Attention rollout (attention map)
-                        lrp : LRP
-                        gi : Gradient x Input
-                        grad2: squared grandient
-                        perturbation_keep: perturbation based method for Early et al 2022.
-
-    method get_heatmap(batch, heatmap_type) from the base class can be used to get the heatmap of desired method.
-    """
 
     def __init__(
         self,
         model,
+        head_type="classification",
         explained_class=None,
         explained_rel="logit",
         lrp_params=None,
         contrastive_class=None,
         detach_attn=True,
     ):
-        super().__init__()
+        super().__init__(head_type)
         self.model = model
         self.device = model.device
         self.explained_class = explained_class
@@ -314,6 +339,15 @@ class xAttentionMIL(xMIL):
         self.explained_rel = explained_rel
         self.contrastive_class = contrastive_class
         self.detach_attn = detach_attn
+
+    def _get_prediction_score(self, features, bag_sizes, batch):
+        if self.model.is_survival:
+            _, _, risk_scores = self.model(features, bag_sizes)
+            preds = risk_scores[0]
+        else:
+            logits = self.model(features, bag_sizes)
+            preds = logits[0, self.set_explained_class(batch)]
+        return preds
 
     def attention_map(self, batch):
         """
@@ -331,7 +365,7 @@ class xAttentionMIL(xMIL):
         return attention_scores.detach().cpu().numpy().squeeze()
 
     def explain_lrp(self, batch, verbose=False):
-        if self.model.classifier is None:
+        if self.model.linear_head is None:
             raise NotImplementedError()
 
         features, bag_sizes = batch["features"].to(self.device), batch["bag_size"].to(
@@ -362,10 +396,9 @@ class xAttentionMIL(xMIL):
             self.device
         )
         features.requires_grad_(True)
-        logits = self.model(features, bag_sizes)
-        return self.gradient_x_input(
-            features, logits[0, self.set_explained_class(batch)]
-        )
+        preds = self._get_prediction_score(features, bag_sizes, batch)
+        explanations_bag, explanations_vector = self.gradient_x_input(features, preds)
+        return explanations_bag, explanations_vector
 
     def explain_squared_grad(self, batch):
         self.model.eval()
@@ -373,19 +406,9 @@ class xAttentionMIL(xMIL):
             self.device
         )
         features.requires_grad_(True)
-        logits = self.model(features, bag_sizes)
-        return self.squared_grad(features, logits[0, self.set_explained_class(batch)])
-
-    def explain_perturbation(self, batch, perturbation_method):
-        def forward_fn(features, bag_sizes):
-            features, bag_sizes = features.to(self.device), bag_sizes.to(self.device)
-            return self.model(features, bag_sizes)
-
-        self.model.eval()
-        explained_class = self.set_explained_class(batch)
-        return self.perturbation_scores(
-            batch, perturbation_method, forward_fn, explained_class, self.explained_rel
-        )
+        preds = self._get_prediction_score(features, bag_sizes, batch)
+        explanations_bag, explanations_vector = self.squared_grad(features, preds)
+        return explanations_bag, explanations_vector
 
     def explain_integrated_gradients(self, batch):
         def forward_fn_(bag_sizes_, features_):
@@ -397,9 +420,15 @@ class xAttentionMIL(xMIL):
         )
         forward_ = partial(forward_fn_, bag_sizes)
 
-        ig = IntegratedGradients(forward_)
-        explanations = self.integrated_gradients(
-            ig, features, self.set_explained_class(batch)
-        )
+        if self.model.is_survival:
+            ig = IntegratedGradients(lambda x: forward_(x)[-1])
+            explanations_bag, explanations_vector = self.integrated_gradients(
+                ig, features, None
+            )
+        else:
+            ig = IntegratedGradients(forward_)
+            explanations_bag, explanations_vector = self.integrated_gradients(
+                ig, features, self.set_explained_class(batch)
+            )
 
-        return explanations
+        return explanations_bag, explanations_vector

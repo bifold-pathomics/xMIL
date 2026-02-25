@@ -1,15 +1,16 @@
 """
-(c) The classes TransLayer, PPEG, TransMIL are partly copied from https://github.com/szc19990412/TransMIL
-
-(c) xTransMIl, all xforward methods, and the classifier class are original implementations.
+(c) The classes TransLayer, PPEG, TransMIL are partly copied from the repository of original transmil paper.
 
 """
 
+from functools import partial
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from captum.attr import IntegratedGradients
 
+from models.utils import BlockLinear
 from models.attention import Attention
 
 from xai.lrp_rules import modified_linear_layer
@@ -23,9 +24,6 @@ from xai.explanation import xMIL
 
 
 class TransLayer(nn.Module):
-    """
-    (c) init and forward methods refactored from https://github.com/szc19990412/TransMIL
-    """
 
     def __init__(
         self,
@@ -71,7 +69,7 @@ class TransLayer(nn.Module):
     def xforward(self, x, detach_norm=None, lrp_params=None, verbose=False):
         """
         forward method for the explanation stage.
-        Args:
+
         :param x:
         :param detach_norm: [Dictionary or None (default)] dic containing booleans whether to detach the mean
              and/or the std in the normalization layer. None is equivalent to {'mean': False, 'std': False}.
@@ -102,10 +100,6 @@ class TransLayer(nn.Module):
 
 
 class PPEG(nn.Module):
-    """
-    init and forward methods refactored from https://github.com/szc19990412/TransMIL
-    """
-
     def __init__(self, dim=512, cls_token=True):
         super(PPEG, self).__init__()
         self.proj = nn.Conv2d(dim, dim, 7, 1, 7 // 2, groups=dim)
@@ -113,7 +107,7 @@ class PPEG(nn.Module):
         self.proj2 = nn.Conv2d(dim, dim, 3, 1, 3 // 2, groups=dim)
         self.cls_token = cls_token
 
-    def forward(self, x, H, W):
+    def forward(self, x, H, W, detach_pe=False):
         B, _, C = x.shape
         if self.cls_token:
             cls_token, feat_token = x[:, 0], x[:, 1:]
@@ -121,7 +115,20 @@ class PPEG(nn.Module):
             feat_token = x
 
         cnn_feat = feat_token.transpose(1, 2).view(B, C, H, W)
-        x = cnn_feat + self.proj(cnn_feat) + self.proj1(cnn_feat) + self.proj2(cnn_feat)
+        if detach_pe:
+            x = (
+                cnn_feat
+                + self.proj(cnn_feat).data
+                + self.proj1(cnn_feat).data
+                + self.proj2(cnn_feat).data
+            )
+        else:
+            x = (
+                cnn_feat
+                + self.proj(cnn_feat)
+                + self.proj1(cnn_feat)
+                + self.proj2(cnn_feat)
+            )
         x = x.flatten(2).transpose(1, 2)
 
         if self.cls_token:
@@ -176,8 +183,10 @@ class TransMILPooler(nn.Module):
         self.method = method
         if method == "cls_token":
             self.pooler = lambda x: x[:, cls_token_ind]
+        elif method == "sum":
+            self.pooler = lambda x: x.sum(dim=1)
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"Pooling method '{method}' is not implemented.")
 
     def forward(self, x):
         return self.pooler(x)
@@ -188,7 +197,7 @@ class TransMIL(nn.Module):
         self,
         n_feat_input,
         n_feat,
-        n_classes,
+        head_dim,
         device,
         attention="nystrom",
         n_layers=2,
@@ -199,12 +208,18 @@ class TransMIL(nn.Module):
         pool_method="cls_token",
         n_out_layers=0,
         bias=True,
+        num_encoders=1,
+        is_survival=False,
+        use_ppeg=True,
     ):
         """
 
         :param n_feat_input: (int) Dimension of the incoming feature vectors.
         :param n_feat: (int) Output dimension of the linear layer applied to the feature vectors.
-        :param n_classes: (int) Number of classes to predict.
+        :param head_dim: (int) output dimension of the last linear layer.
+                                In a classification task, it is number of classes.
+                                In a regression task, it should be 1.
+                                In survival task, it is the number of time intervals.
         :param device: the operating device
         :param attention: (str) attention type. can be 'nystrom' or 'dot_prod'
         :param n_layers: (int) number of transformer layers
@@ -214,7 +229,10 @@ class TransMIL(nn.Module):
         :param attn_residual: (bool) if True, there will be a residual connection in self attention. default: True.
         :param pool_method: (str) can be 'cls_token' (default) or 'sum'.
         :param n_out_layers: (int) number of linear layers applied before the classifier.
-        :param bias: (bool) if False then the bias term is omitted from all linear layers. default: True
+        :param bias: (bool) if False then the bias term is omited from all linear layers. default: True
+        :param num_encoders: (int): number of encoders at the first layer
+        :param is_survival: (bool) whether the model is learning a survival task
+        :param use_ppeg: (bool) if true, there will be a PPEG layer
         """
         super().__init__()
         if n_layers < 2:
@@ -225,11 +243,26 @@ class TransMIL(nn.Module):
         self.bias = bias
         self.n_feat_input = n_feat_input
         self.n_feat = n_feat
-        self.n_classes = n_classes
+        self.head_dim = head_dim
         self.device = device
         self.n_layers = n_layers
-        self._fc1 = nn.Sequential(nn.Linear(n_feat_input, n_feat, bias=bias), nn.ReLU())
-        self.pos_layer = PPEG(dim=n_feat, cls_token=(pool_method == "cls_token"))
+        self.num_encoders = num_encoders
+        self.is_survival = is_survival
+        self.use_ppeg = use_ppeg
+
+        if self.num_encoders == 1:
+            encoder_layer = nn.Linear
+        else:
+            encoder_layer = partial(BlockLinear, num_blocks=num_encoders)
+
+        self._fc1 = nn.Sequential(
+            encoder_layer(n_feat_input, n_feat, bias=bias), nn.ReLU()
+        )
+        self.pos_layer = (
+            PPEG(dim=n_feat, cls_token=(pool_method == "cls_token"))
+            if use_ppeg
+            else None
+        )
         self.norm = nn.LayerNorm(n_feat)
         self.attention = attention
         self.translayers = nn.Sequential(
@@ -248,10 +281,10 @@ class TransMIL(nn.Module):
         self.dropout_class = nn.Dropout(dropout_class)
         self.dropout_feat = nn.Dropout(dropout_feat)
 
-        # pooling settings
         self.pool_method = pool_method
-        self.pooler = TransMILPooler(method=pool_method)
         self.cls_token = nn.Parameter(torch.randn(1, 1, n_feat))
+
+        self.pooler = TransMILPooler(method=pool_method)
 
         # MLP at output
         mlp_layers = [
@@ -263,14 +296,16 @@ class TransMIL(nn.Module):
         ]
         self.mlp_layers = nn.Sequential(*mlp_layers)
 
-        self._fc2 = nn.Linear(n_feat, n_classes, bias=bias)
+        if head_dim is not None:
+            self._fc2 = nn.Linear(n_feat, head_dim, bias=bias)
+        else:
+            self._fc2 = None
 
     def _pad(self, h):
         """
         pads the input with part of itself so that the last dimension is a power of 2. Then it adds a random
         token to at the beginning of each slide as the class token.
 
-        (c) refactored from https://github.com/szc19990412/TransMIL
         """
         H = h.shape[1]
         H_ = int(np.ceil(np.sqrt(H)))
@@ -280,20 +315,22 @@ class TransMIL(nn.Module):
         return h, H_
 
     def _add_clstoken(self, h):
-        """
-        (c) refactored from https://github.com/szc19990412/TransMIL
-        """
+        if self.pool_method != "cls_token":
+            raise ValueError(
+                "The class token can be added only if the cls_token argument of the model is True."
+            )
         B = h.shape[0]
         cls_tokens = self.cls_token.expand(B, -1, -1).to(self.device)
         return torch.cat((cls_tokens, h), dim=1)
 
-    def forward(self, x, save_attn=False):
+    def forward(self, x, detach_pe=False, save_attn=False):
         h = x.float()  # [B, n, n_feat_input]
         h = self._fc1(h)  # [B, n, n_feat]
         h = self.dropout_feat(h)
 
         # ----> pad
-        h, _H = self._pad(h)
+        if self.use_ppeg:
+            h, _H = self._pad(h)
 
         # ---->cls_token
         if self.pool_method == "cls_token":
@@ -303,7 +340,8 @@ class TransMIL(nn.Module):
         h = self.translayers[0](h, save_attn=save_attn)
 
         # ---->PPEG
-        h = self.pos_layer(h, _H, _H)  # [B, N, n_feat]
+        if self.use_ppeg:
+            h = self.pos_layer(h, _H, _H, detach_pe)  # [B, N, n_feat]
 
         # ---->Translayer x2 onwards
         for layer in self.translayers[1:]:
@@ -316,16 +354,40 @@ class TransMIL(nn.Module):
             h = self.pooler(h)  # [B, n_feat]
 
         if self.mlp_layers:
-            self.mlp_layers(h)
-
+            h = self.mlp_layers(h)
         # ---->predict
         h = self.dropout_class(h)
-        res = self._fc2(h)  # [B, n_classes]
+        if self._fc2 is not None:
+            res = self._fc2(h)  # [B, n_classes]
+
+            if self.pool_method == "sum":
+                res = self.pooler(res)  # [B, n_feat]
+
+        else:
+            res = h
+
+        if self.is_survival:
+            hazards = torch.sigmoid(res)
+            survivals = torch.cumprod(1 - hazards, dim=1)
+            risk_score = -(torch.sum(survivals, dim=1))
+            return hazards, survivals, risk_score
 
         return res
 
-    def forward_fn(self, features, bag_sizes):
+    def forward_fn(self, features, bag_sizes=None):
         return self.forward(features)
+
+    def set_linear_head(self, linear_layer=None):
+        self._fc2 = linear_layer
+
+    def get_linear_head(self):
+        return self._fc2
+
+    def get_out_layers(self):
+        return self.mlp_layers
+
+    def set_out_layers(self, out_layers):
+        self.mlp_layers = out_layers
 
     def activations(
         self, x, detach_norm=None, detach_pe=False, lrp_params=None, verbose=False
@@ -335,7 +397,6 @@ class TransMIL(nn.Module):
 
         Args:
             x: [n_batch x n_patch x n_feat] input feature tensor.
-
             detach_norm: [Dictionary or None (default)] dict containing booleans whether to detach the mean
              and/or the std in the normalization layer. None is equivalent to {'mean': False, 'std': False}.
 
@@ -353,6 +414,8 @@ class TransMIL(nn.Module):
             is the output of the xforward method of the previous layer.
 
         """
+        if self.num_encoders > 1:
+            raise ValueError("Cannot compute LRP for BlockLinear layer yet.")
 
         if detach_norm is None:
             norm_last = self.norm
@@ -388,11 +451,15 @@ class TransMIL(nn.Module):
         feats_p = _fc1_(fc1_input_data)
 
         # ----> pad and add cls token
-        feats, _H = self._pad(feats)  # [B, N, n_feat]
-        feats = self._add_clstoken(feats)
+        if self.use_ppeg:
+            feats, _H = self._pad(feats)  # [B, N, n_feat]
+        if self.pool_method == "cls_token":
+            feats = self._add_clstoken(feats)
 
-        feats_p, _H = self._pad(feats_p)  # [B, N, n_feat]
-        feats_p = self._add_clstoken(feats_p)
+        if self.use_ppeg:
+            feats_p, _H = self._pad(feats_p)  # [B, N, n_feat]
+        if self.pool_method == "cls_token":
+            feats_p = self._add_clstoken(feats_p)
 
         # ---->Translayer 0
         attn0_input = feats
@@ -411,21 +478,25 @@ class TransMIL(nn.Module):
             verbose=verbose,
         )
         # ---->PPEG
-        pos_enc_input = attn_output
-        pos_enc_input_p = None
-        pos_enc_input_data = var_data_requires_grad(pos_enc_input)
-        activations["pos-enc"] = {
-            "input": pos_enc_input,
-            "input-data": pos_enc_input_data,
-            "input-p": pos_enc_input_p,
-        }
+        if self.use_ppeg:
+            pos_enc_input = attn_output
+            pos_enc_input_p = None
+            pos_enc_input_data = var_data_requires_grad(pos_enc_input)
+            activations["pos-enc"] = {
+                "input": pos_enc_input,
+                "input-data": pos_enc_input_data,
+                "input-p": pos_enc_input_p,
+            }
 
-        pos_enc_output = self.pos_layer.xforward(
-            pos_enc_input_data, _H, _H, lrp_params, detach_pe
-        )
+            pos_enc_output = self.pos_layer.xforward(
+                pos_enc_input_data, _H, _H, lrp_params, detach_pe
+            )
 
         # ---->Translayer 1 onwards
-        attn_input = pos_enc_output
+        if self.use_ppeg:
+            attn_input = pos_enc_output
+        else:
+            attn_input = attn_output
         attn_input_p = None
 
         for i_layer, layer in enumerate(self.translayers[1:]):
@@ -435,7 +506,6 @@ class TransMIL(nn.Module):
                 "input-data": attn_input_data,
                 "input-p": attn_input_p,
             }
-
             attn_output = layer.xforward(
                 attn_input_data,
                 detach_norm=detach_norm,
@@ -459,35 +529,81 @@ class TransMIL(nn.Module):
         norm_output = norm_last(norm_input_data)  # [B, n_feat]
 
         # ----> pooler
-        pooler_input = norm_output
-        pooler_input_p = None
-        pooler_input_data = var_data_requires_grad(pooler_input)
-        activations["pooler"] = {
-            "input": pooler_input,
-            "input-data": pooler_input_data,
-            "input-p": pooler_input_p,
-        }
+        if self.pool_method == "cls_token":
+            pooler_input = norm_output
+            pooler_input_p = None
+            pooler_input_data = var_data_requires_grad(pooler_input)
+            activations["pooler"] = {
+                "input": pooler_input,
+                "input-data": pooler_input_data,
+                "input-p": pooler_input_p,
+            }
 
-        pooler_output = self.pooler(pooler_input_data)  # [B, n_feat]
+            pooler_output = self.pooler(pooler_input_data)  # [B, n_feat]
+
+        # ----> mlp layers
+        if self.pool_method == "cls_token":
+            mlp_input = pooler_output
+        else:
+            mlp_input = norm_output
+
+        mlp_input_p = None
+
+        for i_layer, layer in enumerate(self.mlp_layers):
+            fc = layer[0]
+
+            mlp_input_data = var_data_requires_grad(mlp_input)
+            activations[f"mlp-{i_layer}"] = {
+                "input": mlp_input,
+                "input-data": mlp_input_data,
+                "input-p": mlp_input_p,
+            }
+
+            fc_ = modified_linear_layer(
+                fc, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+            )
+            mlp_out = F.relu(fc(mlp_input_data))
+            mlp_out_p = fc_(mlp_input_data)
+
+            mlp_input = mlp_out
+            mlp_input_p = mlp_out_p
 
         # ---->predict
-        classifier_input = pooler_output
-        classifier_input_p = None
-        classifier_input_data = var_data_requires_grad(classifier_input)
-        activations["classifier"] = {
-            "input": classifier_input,
-            "input-data": classifier_input_data,
-            "input-p": classifier_input_p,
-        }
+        if self._fc2 is not None:
+            classifier_input = mlp_input
+            classifier_input_p = mlp_input_p
+            classifier_input_data = var_data_requires_grad(classifier_input)
+            activations["classifier"] = {
+                "input": classifier_input,
+                "input-data": classifier_input_data,
+                "input-p": classifier_input_p,
+            }
 
-        logits = self._fc2(classifier_input_data)  # [B, n_classes]
+            logits = self._fc2(classifier_input_data)  # [B, n_classes]
 
-        classifier_ = modified_linear_layer(
-            self._fc2, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
-        )
-        logits_p = classifier_(classifier_input_data)
+            classifier_ = modified_linear_layer(
+                self._fc2, lrp_params["gamma"], no_bias=lrp_params["no_bias"]
+            )
+            logits_p = classifier_(classifier_input_data)
 
-        activations["out"] = {"input": logits, "input-p": logits_p}
+            if self.pool_method == "sum":
+                pooler_input = logits
+                pooler_input_p = logits_p
+                pooler_input_data = var_data_requires_grad(pooler_input)
+                activations["pooler"] = {
+                    "input": pooler_input,
+                    "input-data": pooler_input_data,
+                    "input-p": pooler_input_p,
+                }
+
+                pooler_output = self.pooler(pooler_input_data)  # [B, n_feat]
+
+                activations["out"] = {"input": pooler_output, "input-p": None}
+            else:
+                activations["out"] = {"input": logits, "input-p": logits_p}
+
+        else:
+            activations["out"] = {"input": norm_output, "input-p": None}
 
         return activations
 
@@ -504,7 +620,6 @@ class xTransMIL(xMIL):
                         lrp : LRP
                         gi : Gradient x Input
                         grad2: squared grandient
-                        perturbation_keep: perturbation based method for Early et al 2022.
 
     method get_heatmap(batch, heatmap_type) from the base class can be used to get the heatmap of desired method.
     """
@@ -512,6 +627,7 @@ class xTransMIL(xMIL):
     def __init__(
         self,
         model,
+        head_type="classification",
         explained_class=None,
         explained_rel="logit",
         lrp_params=None,
@@ -522,6 +638,7 @@ class xTransMIL(xMIL):
         detach_norm=None,
         detach_mean=False,
         detach_pe=False,
+        use_ppeg=True,
     ):
         """
         Args:
@@ -545,8 +662,10 @@ class xTransMIL(xMIL):
 
             detach_pe: (bool) if True the positional encoder will be detached from the computational graph when
             performing the xforward of PPEG
+
+            use_ppeg: (bool) if True, there will be a PPEG layer
         """
-        super().__init__()
+        super().__init__(head_type)
         self.model = model
         self.device = model.device
         self.explained_class = explained_class
@@ -559,11 +678,21 @@ class xTransMIL(xMIL):
         self.detach_norm = set_detach_norm(detach_norm)
         self.detach_mean = detach_mean
         self.detach_pe = detach_pe
+        self.use_ppeg = use_ppeg
+
+    def _get_prediction_score(self, features, batch):
+        if self.model.is_survival:
+            _, _, risk_scores = self.model(features, self.detach_pe)
+            preds = risk_scores[0]
+        else:
+            logits = self.model(features, self.detach_pe)
+            preds = logits[0, self.set_explained_class(batch)]
+        return preds
 
     def attention_map(self, batch):
         """
         Attention Rollout method from https://arxiv.org/abs/2005.00928
-        (c) refactored from https://github.com/jacobgil/vit-explain/tree/main
+        (c) minimally modified version of https://github.com/jacobgil/vit-explain/tree/main
         """
         n_patches = batch["bag_size"].item()
         features, bag_sizes, targets = (
@@ -574,11 +703,12 @@ class xTransMIL(xMIL):
         features = features.to(torch.float32).to(self.device)
 
         self.model.eval()
-        _ = self.model(features, save_attn=True)
+        _ = self.model(features, self.detach_pe, save_attn=True)
 
         n_attention_tokens = self.model.translayers[0].attn.attn_scores.shape[-2]
-        square_pad_tokens = int(np.ceil(np.sqrt(n_patches))) ** 2 - n_patches
-        attn_pad_tokens = n_attention_tokens - (1 + n_patches + square_pad_tokens)
+        if self.use_ppeg:
+            square_pad_tokens = int(np.ceil(np.sqrt(n_patches))) ** 2 - n_patches
+            attn_pad_tokens = n_attention_tokens - (1 + n_patches + square_pad_tokens)
 
         if self.attention_layer is not None:
             attention = self.model.translayers[
@@ -621,10 +751,21 @@ class xTransMIL(xMIL):
                     a = a / a.sum(dim=-1)
 
                     result = torch.matmul(a, result)
-
-        mask = result[
-            0, attn_pad_tokens, attn_pad_tokens + 1 : attn_pad_tokens + 1 + n_patches
-        ]
+        if self.use_ppeg:
+            mask = result[
+                0,
+                attn_pad_tokens,
+                attn_pad_tokens + 1 : attn_pad_tokens + 1 + n_patches,
+            ]
+        else:
+            mask = result[
+                0,
+                0,
+                1
+                + self.model.translayers[0].attn.padding : 1
+                + self.model.translayers[0].attn.padding
+                + n_patches,
+            ]
         self.model.set_attentions_to_none()
         return mask.cpu().detach().numpy()
 
@@ -640,6 +781,10 @@ class xTransMIL(xMIL):
             activations: activations of the layers
 
         """
+        if self.model._fc2 is None:
+            raise NotImplementedError(
+                "This explanation method can be currently only used for classification."
+            )
 
         features = batch["features"].to(torch.float32).to(self.device)
 
@@ -665,39 +810,29 @@ class xTransMIL(xMIL):
         self.model.eval()
         features = batch["features"].to(self.device)
         features.requires_grad_(True)
-        logits = self.model(features)
-        bag_relevance = self.gradient_x_input(
-            features, logits[0, self.set_explained_class(batch)]
-        )
-        return bag_relevance.squeeze()
+        preds = self._get_prediction_score(features, batch)
+        explanations_bag, explanations_vector = self.gradient_x_input(features, preds)
+        return explanations_bag, explanations_vector
 
     def explain_squared_grad(self, batch):
         self.model.eval()
         features = batch["features"].to(self.device)
         features.requires_grad_(True)
-        logits = self.model(features)
-        bag_relevance = self.squared_grad(
-            features, logits[0, self.set_explained_class(batch)]
-        )
-        return bag_relevance.squeeze()
-
-    def explain_perturbation(self, batch, perturbation_method):
-        def forward_fn(features, _bag_sizes):
-            features = features.to(self.device)
-            return self.model(features)
-
-        self.model.eval()
-        explained_class = self.set_explained_class(batch)
-        return self.perturbation_scores(
-            batch, perturbation_method, forward_fn, explained_class, self.explained_rel
-        )
+        preds = self._get_prediction_score(features, batch)
+        explanations_bag, explanations_vector = self.squared_grad(features, preds)
+        return explanations_bag, explanations_vector
 
     def explain_integrated_gradients(self, batch):
         self.model.eval()
         features = batch["features"].to(self.device)
-
-        ig = IntegratedGradients(self.model)
-        explanations = self.integrated_gradients(
-            ig, features, self.set_explained_class(batch)
-        ).squeeze()
-        return explanations
+        if self.model.is_survival:
+            ig = IntegratedGradients(lambda x: self.model(x, self.detach_pe)[-1])
+            explanations_bag, explanations_vector = self.integrated_gradients(
+                ig, features, None
+            )
+        else:
+            ig = IntegratedGradients(lambda x: self.model(x, self.detach_pe))
+            explanations_bag, explanations_vector = self.integrated_gradients(
+                ig, features, self.set_explained_class(batch)
+            )
+        return explanations_bag, explanations_vector

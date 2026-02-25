@@ -2,11 +2,17 @@ import os
 import math
 import ast
 import textwrap
+import json
 
+import openslide
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from PIL import Image
-from visualization.utils import convert2rgb, plot_colorbar
+from matplotlib.backends.backend_pdf import PdfPages
+from copy import deepcopy
+from visualization.utils import convert2rgb, plot_colorbar, clean_outliers_fliers
 
 
 def build_overlay(patches, size, patch_ids, slide_dim, overlay_rgb, background="black"):
@@ -80,12 +86,23 @@ def heatmap_PIL(
 def overlay(bg, fg, alpha=64):
     """
     Creates an overlay of the given foreground on top of the given background using PIL functionality.
+    (c) https://github.com/hense96/patho-preprocessing
     """
     bg = bg.copy()
     fg = fg.copy()
     fg.putalpha(alpha)
     bg.paste(fg, (0, 0), fg)
     return bg
+
+
+def clip_heatmap(patch_scores, p, clip=True):
+    heatmap_scores = deepcopy(patch_scores)
+
+    extreme_low = np.percentile(heatmap_scores, p)
+    extreme_high = np.percentile(heatmap_scores, 100 - p)
+    heatmap_scores[heatmap_scores < extreme_low] = extreme_low if clip else 0
+    heatmap_scores[heatmap_scores > extreme_high] = extreme_high if clip else 0
+    return heatmap_scores, extreme_low, extreme_high
 
 
 def plot_PIL(ax, im, cmap="coolwarm"):
@@ -356,3 +373,176 @@ def display_patches_in_grid(patches, rows, cols, figsize=(10, 10), titles=None):
     plt.tight_layout()
 
     return fig
+
+
+def create_visualization_pdf(
+    data_loader,
+    classifier,
+    xmodel,
+    slides_dirs,
+    patches_dirs,
+    results_dir,
+    scores_df=None,
+    annotations_dirs=None,
+    thumbnail_shape=(612.0, 792.0),
+    side_by_side=True,
+    print_label=True,
+    show_annotations=False,
+    heatmap_type="attention",
+    top_patches=True,
+    cmap_name="coolwarm",
+    preface=None,
+    save_overlays=True,
+    target_names=None,
+    cut_top_k_percent=None,
+    pdf_suffix="",
+    verbose=False,
+):
+    """
+    Creates a PDF with visualizations of the model predictions for all given slides.
+
+    :param data_loader: (DataLoader) DataLoader object with all elements to predict on. The loader should have batch
+        size 1.
+    :param model: (nn.Module) Model object to fetch patch scores from.
+    :param classifier: Classifier object to predict with.
+    :param xmodel: Explanation model object for creating explanations
+    :param slides_dirs: (list<str>) The directory where the slides are located.
+    :param patches_dirs: (list<str>) The directory where the patches are located.
+    :param results_dir: (str) Directory to save the visualizations in.
+    :param scores_df: (pandas dataframe) dataframe with patchscores
+    :param annotations_dirs: (list<str>) The directory where the annotations are located.
+    :param thumbnail_shape: (float, float) Desired shape of the thumbnails.
+    :param side_by_side: (bool) if True, slide and heatmap are plotted side-by-side; if False, they are overlaid into
+        a single plot
+    :param print_label: (bool)
+    :param show_annotations: (bool) if True, annotations will be overlaid over the slide thumbnails
+    :param heatmap_type: (str) How to create heatmaps, e.g., from 'attention', 'lrp', 'scores'
+    :param top_patches: (boolean): if True, plot patches with the highest scores
+    :param cmap_name: (str) Name of the matplotlib color map for the heatmaps.
+    :param preface: (str): if given, the text will be printed at the first page of the pdf
+    :param save_overlays: (bool) whether to save the slide overlays as separate files
+    :param target_names: (list of str) names of the targets (optional)
+    :param cut_top_k_percent: (float between 0 and 100 inclusive) if not None, the least cut_top_k_percent % and max
+        cut_top_k_percent % of the data will be clipped.
+    :param pdf_suffix: (str) suffix for the saved pdf
+    :param verbose: (bool) Whether to print logs.
+    """
+    # Set up file structure
+    os.makedirs(results_dir, exist_ok=True)
+    pdf_filename = os.path.join(results_dir, f"test_visualizations{pdf_suffix}.pdf")
+    if save_overlays:
+        os.makedirs(os.path.join(results_dir, "overlays"), exist_ok=True)
+
+    with PdfPages(pdf_filename) as pdf:
+
+        # Create preface
+        if preface:
+            fig, ax = plt.subplots()  # Create a letter-sized figure
+            ax.text(0.5, 0.5, preface, fontsize=6, ha="center", va="center")
+            ax.axis("off")
+            pdf.savefig(fig)  # Save the first page to the PDF
+            plt.close(fig)
+
+        for batch in tqdm(data_loader):
+
+            preds, targets, loss, pred_metadata = classifier.validation_step(batch)
+            n_patches = batch["bag_size"].item()
+            if scores_df is not None:
+                df_this_slide = scores_df[
+                    (
+                        scores_df["source_id"]
+                        == batch["sample_ids"]["source_id"][0].item()
+                    )
+                    & (scores_df["slide_id"] == batch["sample_ids"]["slide_id"][0])
+                ]
+                patch_scores = np.array(
+                    json.loads(df_this_slide[f"patch_scores_{heatmap_type}"].item())
+                )
+                patch_scores = patch_scores[-n_patches:]
+            else:
+                patch_scores = xmodel.get_heatmap(batch, heatmap_type, verbose)
+
+            zero_centered = xmodel.get_heatmap_zero_centered(heatmap_type)
+
+            patch_scores, _ = clean_outliers_fliers(patch_scores)
+
+            patch_ids = batch["patch_ids"].numpy().ravel()
+            pred_score = preds[0, -1]
+            target = targets[0]
+            patch_scores = patch_scores.squeeze()
+            source_id, slide_id = (
+                pred_metadata["source_id"][0],
+                pred_metadata["slide_id"][0],
+            )
+
+            # Load slide and annotation
+            slide_file = [
+                slide_file
+                for slide_file in os.listdir(slides_dirs[source_id])
+                if slide_file.startswith(slide_id)
+                and os.path.isfile(os.path.join(slides_dirs[source_id], slide_file))
+            ][0]
+            slide = openslide.open_slide(
+                os.path.join(slides_dirs[source_id], slide_file)
+            )
+            patches_this_slide = pd.read_csv(
+                os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
+                index_col=0,
+            )
+
+            if annotations_dirs is not None and show_annotations:
+                slide_anno = openslide.open_slide(
+                    os.path.join(annotations_dirs[source_id], f"{slide_id}.png")
+                )
+            else:
+                slide_anno = None
+
+            label_print = target.tolist() if print_label else None
+
+            # Create overlay heatmap
+            fig = slide_heatmap_thumbnail(
+                slide=slide,
+                patches=patches_this_slide,
+                patch_ids=patch_ids,
+                patch_scores=patch_scores,
+                slide_name=slide_id,
+                label=label_print,
+                target_names=target_names,
+                pred_score=pred_score.tolist(),
+                annotation=slide_anno,
+                side_by_side=side_by_side,
+                size=thumbnail_shape,
+                cmap_name=cmap_name,
+                background="black",
+                zero_centered=zero_centered,
+            )
+
+            pdf.savefig(fig)
+            plt.close(fig)
+
+            # Plot patches with the highest scores
+            if top_patches:
+                fig, _ = display_top_patches(
+                    patch_ids,
+                    patch_scores,
+                    os.path.join(patches_dirs[source_id], slide_id),
+                )
+                pdf.savefig(fig)
+                plt.close(fig)
+
+            # Save overlays as png files (in a higher resolution)
+            if save_overlays:
+                overlay_dims = (slide.dimensions[0] // 32, slide.dimensions[1] // 32)
+                heatmap_img, _ = heatmap_PIL(
+                    patches=patches_this_slide,
+                    size=overlay_dims,
+                    patch_ids=patch_ids,
+                    slide_dim=slide.dimensions,
+                    score_values=patch_scores,
+                    cmap_name="coolwarm",
+                    background="black",
+                    zero_centered=zero_centered,
+                )
+                heatmap_img.save(
+                    os.path.join(results_dir, "overlays", f"{slide_id}.png"), "PNG"
+                )

@@ -41,7 +41,7 @@ def moore_penrose_iter_pinv(x, iters=6):
 
 class Attention(nn.Module):
     """
-    (c) init and forward methods partly refactored from https://github.com/lucidrains/nystrom-attention
+    (c) please also check https://github.com/lucidrains/nystrom-attention
     """
 
     def __init__(
@@ -92,6 +92,7 @@ class Attention(nn.Module):
             )
 
         self.attn_scores = None
+        self.padding = None
         self.method = method
 
     def self_attention(
@@ -103,6 +104,7 @@ class Attention(nn.Module):
         save_attn=False,
         verbose=False,
     ):
+
         lrp_params = set_lrp_params(lrp_params)
 
         b, n, _ = x.shape
@@ -119,6 +121,8 @@ class Attention(nn.Module):
             if remainder > 0:
                 padding = m - (n % m)
                 x = F.pad(x, (0, 0, padding, 0), value=0)
+                if not xai_mode and save_attn:
+                    self.padding = padding
 
                 if exists(mask):
                     mask = F.pad(mask, (padding, 0), value=False)
@@ -199,6 +203,7 @@ class Attention(nn.Module):
         if self.method == "nystrom":
             attn1, attn2, attn3 = map(lambda t: t.softmax(dim=-1), (sim1, sim2, sim3))
             attn2_inv = moore_penrose_iter_pinv(attn2, iters)
+
             if not xai_mode and not save_attn:
                 # this if case shall be used for the usual forward pass in training
                 out = (attn1 @ attn2_inv) @ (attn3 @ v)
