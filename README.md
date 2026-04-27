@@ -150,4 +150,5 @@ If you find our codes useful in your work, please cite us:
 ```
 
 :copyright: This code is provided under the MIT License. Please refer to the license file for details.
+
 Note: the license was updated from CC BY-NC-ND 4.0 in April 2026.
