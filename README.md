@@ -36,7 +36,7 @@ Accepted as a poster presentation at NeurIPS 2024.
 </details>
 
 <p align="center">
-  <img src="overview_fig.png"/>
+  <img src="assets/overview.png"/>
 </p>
 
 
@@ -55,7 +55,7 @@ can be found under the module ```models```.
 
 ### Model training
 The script ```train.py``` should be used for model training. A template bash script for running ```train.py``` 
-is provided in ```scripts/train_<model_name>_template.sh``` with ```model_name``` being either ```attnmil``` 
+is provided in ```scripts/examples/train_<model_name>_template.sh``` with ```model_name``` being either ```attnmil```
 or ```transmil```. The classifier class for each model is implemented in the respective module. 
 
 The training tools can be found under ```training```.
@@ -65,7 +65,7 @@ We introduce novel toy experiments for benchmarking explanation methods in compl
 The related tools and classes are under the module ```toy_experiments```. 
 The script ```toy_experiment.py``` should be used for running experiments. 
 A template bash script for running experiments is provided in 
-```scripts/toy_experiment_template.sh```
+```scripts/examples/toy_experiment_template.sh```
 
 ### Model explanation
 The module ```xai``` includes the explanation tools. 
@@ -81,7 +81,7 @@ for a slide using a model checkpoint.
 The script ```test.py``` can be used for testing a model checkpoint on a test dataset. 
 The test results will be saved under the specified ```results_dir``` as ```test_performance.pt``` and ```test_performance.csv```.
 If specified in the input arguments, the explanation scores will be computed and saved in ```test_prediction.csv```.
-The script ```scripts/test_template.sh``` is a template script for running ```test.py```. 
+The script ```scripts/examples/test_template.sh``` is a template script for running ```test.py```.
 
 ### Visualizing heatmaps
 The module ```visualization/slideshow.py``` includes the tools for visualizing the slides and heatmaps.
@@ -93,7 +93,7 @@ the notebook ```notebooks/slide_visualizations_compute_heatmaps.ipynb``` should 
 ### Faithfulness experiments: Patch flipping
 The class ```xMILEval``` under ```xai/evaluation.py``` is the class for patch flipping evaluation experiments. 
 The script ```evaluate_patch_flipping.py``` is used for performing patch flipping experiments. 
-The bash script ```scripts/patch_flipping_template.sh``` is a template of how to run faithfulness experiments 
+The bash script ```scripts/examples/patch_flipping_template.sh``` is a template of how to run faithfulness experiments
 using ```evaluate_patch_flipping.py```.
 
 ## Reproducibility
@@ -117,7 +117,7 @@ The following file structure is required for using our data loader:
 - A features directory containing a PyTorch file ```{slide_id}.pt``` per slide, which includes a Tensor of extracted features in the same order as the sorted ```patch_id``` values of this slide (ascending). The shape of each Tensor should be ```(num_patches, num_features)```.
 
 ### Splits
-The data splitting for the experiments in the manuscript was performed using the scripts under ```scripts/splitting```. 
+The data splitting for the experiments in the manuscript was performed using the scripts under ```scripts/examples/splitting```.
 The split files are provided under the folder ```results/splits```.
 
 ### Model checkpoints and hyperparameters
