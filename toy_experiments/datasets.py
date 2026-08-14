@@ -9,34 +9,53 @@ from tqdm import tqdm
 
 
 def get_number_mil_dataset(
-        dataset_type, num_numbers, num_bags, num_instances, features_type='mnist_resnet18', sampling='hierarchical',
-        noise=1.0, threshold=1, features_path=None
+    dataset_type,
+    num_numbers,
+    num_bags,
+    num_instances,
+    features_type="mnist_resnet18",
+    sampling="hierarchical",
+    noise=1.0,
+    threshold=1,
+    features_path=None,
 ):
-    if dataset_type == 'smil':
+    if dataset_type == "smil":
         dataset_cls = SMILDataset
-    elif dataset_type == 'four_bags':
+    elif dataset_type == "four_bags":
         dataset_cls = FourBagsDataset
-    elif dataset_type == 'pos_neg':
+    elif dataset_type == "pos_neg":
         dataset_cls = PosNegDataset
-    elif dataset_type == 'adjacent_pairs':
+    elif dataset_type == "adjacent_pairs":
         dataset_cls = AdjacentPairsDataset
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
     dataset = dataset_cls(
-        num_numbers=num_numbers, num_bags=num_bags, num_instances=num_instances, features_type=features_type,
-        sampling=sampling, noise=noise, threshold=threshold, features_path=features_path
+        num_numbers=num_numbers,
+        num_bags=num_bags,
+        num_instances=num_instances,
+        features_type=features_type,
+        sampling=sampling,
+        noise=noise,
+        threshold=threshold,
+        features_path=features_path,
     )
     return dataset
 
 
 def get_MNIST_features(root, download=True):
-    transform_1 = transforms.Compose([
-        transforms.Grayscale(num_output_channels=3),
-        transforms.ToTensor(),
-    ])
+    transform_1 = transforms.Compose(
+        [
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+        ]
+    )
     # Load dataset
-    trainset = torchvision.datasets.MNIST(root=root, train=True, download=download, transform=transform_1)
-    testset = torchvision.datasets.MNIST(root=root, train=False, download=download, transform=transform_1)
+    trainset = torchvision.datasets.MNIST(
+        root=root, train=True, download=download, transform=transform_1
+    )
+    testset = torchvision.datasets.MNIST(
+        root=root, train=False, download=download, transform=transform_1
+    )
     train_loader = DataLoader(trainset, batch_size=64, shuffle=False)
     test_loader = DataLoader(testset, batch_size=64, shuffle=False)
     # Load feature extraction model
@@ -66,15 +85,18 @@ def bag_collate_fn(batch_list):
     """
     col_batch = {}
     for key in batch_list[0].keys():
-        if key == 'features':
+        if key == "features":
             col_batch[key] = torch.concat([batch[key] for batch in batch_list])
-        elif key == 'sample_ids':
-            col_batch[key] = {col: [batch[key][col] for batch in batch_list] for col in batch_list[0][key]}
-        elif key == 'targets':
+        elif key == "sample_ids":
+            col_batch[key] = {
+                col: [batch[key][col] for batch in batch_list]
+                for col in batch_list[0][key]
+            }
+        elif key == "targets":
             col_batch[key] = torch.stack([batch[key] for batch in batch_list])
-        elif key == 'numbers':
+        elif key == "numbers":
             col_batch[key] = torch.stack([batch[key] for batch in batch_list])
-        elif key == 'evidence':
+        elif key == "evidence":
             red_batch_list = []
             for batch in batch_list:
                 red_batch_list.append({key: batch[key]})
@@ -86,40 +108,69 @@ def bag_collate_fn(batch_list):
 
 class NumberMILDataset(Dataset):
 
-    def __init__(self, num_numbers, num_bags, num_instances, noise=1.0, threshold=1, sampling='hierarchical',
-                 features_type='mnist_resnet18', features_path=None):
+    def __init__(
+        self,
+        num_numbers,
+        num_bags,
+        num_instances,
+        noise=1.0,
+        threshold=1,
+        sampling="hierarchical",
+        features_type="mnist_resnet18",
+        features_path=None,
+    ):
         self.num_numbers = num_numbers
         self.num_bags = num_bags
         self.num_instances = num_instances
         self.thr = threshold
         self.numbers = []
         while len(self.numbers) < num_bags:
-            if sampling == 'unique':
-                sampled_numbers = np.random.choice(np.arange(self.num_numbers), size=num_instances, replace=False)
+            if sampling == "unique":
+                sampled_numbers = np.random.choice(
+                    np.arange(self.num_numbers), size=num_instances, replace=False
+                )
                 self.numbers.append(sampled_numbers)
-            elif sampling == 'uniform':
-                sampled_numbers = np.random.choice(np.arange(self.num_numbers), size=num_instances, replace=True)
+            elif sampling == "uniform":
+                sampled_numbers = np.random.choice(
+                    np.arange(self.num_numbers), size=num_instances, replace=True
+                )
                 self.numbers.append(sampled_numbers)
-            elif sampling == 'hierarchical':
-                sampled_numbers = np.where(np.random.randint(0, 2, size=num_numbers) == 1)[0]
+            elif sampling == "hierarchical":
+                sampled_numbers = np.where(
+                    np.random.randint(0, 2, size=num_numbers) == 1
+                )[0]
                 if len(sampled_numbers) > 0:
-                    self.numbers.append(np.random.choice(sampled_numbers, size=num_instances))
+                    self.numbers.append(
+                        np.random.choice(sampled_numbers, size=num_instances)
+                    )
             else:
                 raise ValueError(f"Unknown sampling strategy: {sampling}")
         self.numbers = np.concatenate(self.numbers)
-        if features_type == 'onehot':
-            self.features = np.random.normal(loc=0.0, scale=noise, size=(num_bags * num_instances, num_numbers)) + \
-                            np.eye(num_numbers)[self.numbers]
-        elif features_type == 'mnist_resnet18':
+        if features_type == "onehot":
+            self.features = (
+                np.random.normal(
+                    loc=0.0, scale=noise, size=(num_bags * num_instances, num_numbers)
+                )
+                + np.eye(num_numbers)[self.numbers]
+            )
+        elif features_type == "mnist_resnet18":
             data_dict = {
-                idx: torch.load(os.path.join(features_path, f'class_{idx}.pt')) for idx in range(10)
+                idx: torch.load(os.path.join(features_path, f"class_{idx}.pt"))
+                for idx in range(10)
             }
-            self.features = np.stack([data_dict[n][np.random.choice(data_dict[n].shape[0])] for n in self.numbers])
+            self.features = np.stack(
+                [
+                    data_dict[n][np.random.choice(data_dict[n].shape[0])]
+                    for n in self.numbers
+                ]
+            )
         else:
             raise ValueError(f"Unknown features type: {features_type}")
 
         self.numbers = torch.tensor(self.numbers.reshape(num_bags, num_instances))
-        self.features = torch.tensor(self.features.reshape(num_bags, num_instances, -1), dtype=torch.float32)
+        self.features = torch.tensor(
+            self.features.reshape(num_bags, num_instances, -1), dtype=torch.float32
+        )
         self.num_features = self.features.shape[-1]
 
     @property
@@ -130,8 +181,12 @@ class NumberMILDataset(Dataset):
         return self.num_bags
 
     def __getitem__(self, idx):
-        return {'features': self.features[idx], 'bag_size': self.num_instances, 'numbers': self.numbers[idx],
-                'sample_ids': {}}
+        return {
+            "features": self.features[idx],
+            "bag_size": self.num_instances,
+            "numbers": self.numbers[idx],
+            "sample_ids": {},
+        }
 
 
 class SMILDataset(NumberMILDataset):
@@ -143,13 +198,17 @@ class SMILDataset(NumberMILDataset):
     def __getitem__(self, idx):
         pos_number = 9
         item = super().__getitem__(idx)
-        number_count = torch.bincount(item['numbers'], minlength=self.num_numbers)
+        number_count = torch.bincount(item["numbers"], minlength=self.num_numbers)
         if number_count[pos_number] >= self.thr:
             targets = torch.tensor([1])
         else:
             targets = torch.tensor([0])
-        pos_evidence = (item['numbers'] == pos_number) * 1
-        return {**item, 'targets': targets, 'evidence': {0: -pos_evidence, 1: pos_evidence}}
+        pos_evidence = (item["numbers"] == pos_number) * 1
+        return {
+            **item,
+            "targets": targets,
+            "evidence": {0: -pos_evidence, 1: pos_evidence},
+        }
 
 
 class PosNegDataset(NumberMILDataset):
@@ -162,15 +221,15 @@ class PosNegDataset(NumberMILDataset):
         pos_numbers = torch.tensor([4, 6, 8])
         neg_numbers = torch.tensor([5, 7, 9])
         item = super().__getitem__(idx)
-        number_count = torch.bincount(item['numbers'], minlength=self.num_numbers)
+        number_count = torch.bincount(item["numbers"], minlength=self.num_numbers)
         if number_count[pos_numbers].sum() > sum(number_count[neg_numbers]):
             targets = torch.tensor([1])
         else:
             targets = torch.tensor([0])
-        pos_evidence = torch.isin(item['numbers'], pos_numbers) * 1
-        neg_evidence = torch.isin(item['numbers'], neg_numbers) * 1
+        pos_evidence = torch.isin(item["numbers"], pos_numbers) * 1
+        neg_evidence = torch.isin(item["numbers"], neg_numbers) * 1
         evidence = {0: neg_evidence - pos_evidence, 1: pos_evidence - neg_evidence}
-        return {**item, 'targets': targets, 'evidence': evidence}
+        return {**item, "targets": targets, "evidence": evidence}
 
 
 class FourBagsDataset(NumberMILDataset):
@@ -182,18 +241,20 @@ class FourBagsDataset(NumberMILDataset):
     def __getitem__(self, idx):
         c1_number, c2_number = 8, 9
         item = super().__getitem__(idx)
-        number_count = torch.bincount(item['numbers'], minlength=self.num_numbers)
+        number_count = torch.bincount(item["numbers"], minlength=self.num_numbers)
         if number_count[c1_number] >= self.thr > number_count[c2_number]:
             targets = torch.tensor([1])
         elif number_count[c2_number] >= self.thr > number_count[c1_number]:
             targets = torch.tensor([2])
-        elif number_count[c1_number] >= self.thr and number_count[c2_number] >= self.thr:
+        elif (
+            number_count[c1_number] >= self.thr and number_count[c2_number] >= self.thr
+        ):
             targets = torch.tensor([3])
         else:
             targets = torch.tensor([0])
         num_positions = {
-            c1_number: (item['numbers'] == c1_number) * 1,
-            c2_number: (item['numbers'] == c2_number) * 1,
+            c1_number: (item["numbers"] == c1_number) * 1,
+            c2_number: (item["numbers"] == c2_number) * 1,
         }
         evidence = {
             0: -num_positions[c1_number] - num_positions[c2_number],
@@ -201,7 +262,7 @@ class FourBagsDataset(NumberMILDataset):
             2: -num_positions[c1_number] + num_positions[c2_number],
             3: num_positions[c1_number] + num_positions[c2_number],
         }
-        return {**item, 'targets': targets, 'evidence': evidence}
+        return {**item, "targets": targets, "evidence": evidence}
 
 
 class AdjacentPairsDataset(NumberMILDataset):
@@ -212,7 +273,7 @@ class AdjacentPairsDataset(NumberMILDataset):
 
     def __getitem__(self, idx):
         item = super().__getitem__(idx)
-        number_count = torch.bincount(item['numbers'], minlength=self.num_numbers)
+        number_count = torch.bincount(item["numbers"], minlength=self.num_numbers)
         evidence_thr = 5
         numbers = (number_count >= self.thr).nonzero().squeeze().tolist()
         pos_tuples = []
@@ -226,5 +287,11 @@ class AdjacentPairsDataset(NumberMILDataset):
             targets = torch.tensor([1])
         else:
             targets = torch.tensor([0])
-        pos_evidence = (torch.isin(item['numbers'], torch.tensor(pos_tuples).flatten())) * 1
-        return {**item, 'targets': targets, 'evidence': {0: -pos_evidence, 1: pos_evidence}}
+        pos_evidence = (
+            torch.isin(item["numbers"], torch.tensor(pos_tuples).flatten())
+        ) * 1
+        return {
+            **item,
+            "targets": targets,
+            "evidence": {0: -pos_evidence, 1: pos_evidence},
+        }

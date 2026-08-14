@@ -1,17 +1,10 @@
 import os
 import json
 import argparse
-from datetime import datetime
+from itertools import product
+import hashlib
 
-import pandas as pd
-import numpy as np
-import torch
-from torch.utils.tensorboard import SummaryWriter
-
-from splits import balance_labels
-from datasets import DatasetFactory
-from models import ModelFactory
-from training import TrainTestExecutor, Callback
+from train import main as train
 
 
 def get_args():
@@ -32,23 +25,20 @@ def get_args():
     # Dataset args
     parser.add_argument(
         "--train-subsets",
-        default=["train"],
-        nargs="+",
-        type=str,
+        default=[["train"]],
+        type=json.loads,
         help="Split subsets that are used for training.",
     )
     parser.add_argument(
         "--val-subsets",
-        default=["test"],
-        nargs="+",
-        type=str,
+        default=[["test"]],
+        type=json.loads,
         help="Split subsets that are used for validation.",
     )
     parser.add_argument(
         "--test-subsets",
-        default=None,
-        nargs="+",
-        type=str,
+        default=[None],
+        type=json.loads,
         help="Split subsets that are used for testing.",
     )
     parser.add_argument(
@@ -78,8 +68,10 @@ def get_args():
     parser.add_argument(
         "--train-bag-size",
         type=int,
-        default=None,
-        help="Number of patches to sample per slide. If None or -1, all patches are used.",
+        nargs="+",
+        default=[None],
+        help="Number of patches to sample per slide. If None or -1, all patches are used."
+        "Zipped with train-bag-size, train-batch-size.",
     )
     parser.add_argument(
         "--sort-sampled-patches",
@@ -107,13 +99,9 @@ def get_args():
         default=None,
         help="Maximum number of patches per slide. Slides with more patches are dropped.",
     )
-    parser.add_argument("--min-bag-size", type=int, default=0)
     parser.add_argument(
         "--preload-data",
-        type=lambda x: (str(x).lower() == "true"),
-        nargs="?",
-        const=True,
-        default=False,
+        action="store_true",
         help="Whether to preload all features into RAM before starting training.",
     )
 
@@ -131,10 +119,7 @@ def get_args():
         help="The dimension of the feature vectors.",
     )
     parser.add_argument(
-        "--head-dim",
-        type=int,
-        default=2,
-        help="The number of outputs (logits) of the last linear layer of the models.",
+        "--head-dim", type=int, default=2, help="The number of classes to predict."
     )
     parser.add_argument(
         "--targets",
@@ -158,6 +143,13 @@ def get_args():
         default="classification",
         choices=["survival", "classification", "regression"],
     )
+    parser.add_argument(
+        "--features-dim",
+        type=int,
+        nargs="+",
+        default=[256],
+        help="Output dimension of the initial linear layer applied to the feature vectors in a model.",
+    )
 
     parser.add_argument("--metric-name", type=str, nargs="+", default=None)
     # todo: the decision_metric should be set up for classification as well. for survival it should work with 'c_index'
@@ -168,41 +160,55 @@ def get_args():
         help="reference value for the regression model.",
     )
 
-    parser.add_argument(
-        "--features-dim",
-        type=int,
-        default=256,
-        help="Output dimension of the initial linear layer applied to the feature vectors in a model.",
-    )
-
     # -- Attention MIL
     parser.add_argument(
         "--inner-attention-dim",
         type=int,
-        default=128,
+        nargs="+",
+        default=[128],
         help="Inner hidden dimension of the 2-layer attention mechanism in an AttentionMIL model.",
     )
     parser.add_argument(
         "--dropout-strategy",
         type=str,
-        default="features",
+        nargs="+",
+        default=["features"],
         choices=["features", "last", "all"],
         help="Which layers to apply dropout to.",
     )
     parser.add_argument(
         "--dropout",
         type=float,
-        default=None,
+        nargs="+",
+        default=[0],
         help="Fraction of neurons to drop per targeted layer. None to apply no dropout.",
     )
-    parser.add_argument("--num-layers", type=int, default=1)
+    parser.add_argument("--num-layers", type=int, nargs="+", default=[1])
 
     # -- TransMIL
-    parser.add_argument("--dropout-att", type=float, default=0.75)
-    parser.add_argument("--dropout-class", type=float, default=0.75)
-    parser.add_argument("--dropout-feat", type=float, default=0)
+    parser.add_argument(
+        "--dropout-att",
+        type=float,
+        nargs="+",
+        default=[0.75],
+        help="Zipped with dropout-att, dropout-class, dropout-feat.",
+    )
+    parser.add_argument(
+        "--dropout-class",
+        type=float,
+        nargs="+",
+        default=[0.75],
+        help="Zipped with dropout-att, dropout-class, dropout-feat.",
+    )
+    parser.add_argument(
+        "--dropout-feat",
+        type=float,
+        nargs="+",
+        default=[0],
+        help="Zipped with dropout-att, dropout-class, dropout-feat.",
+    )
     parser.add_argument("--attention", type=str, default="nystrom")
-    parser.add_argument("--n-layers", type=int, default=2)
+    parser.add_argument("--n-layers", type=int, nargs="+", default=[2])
     parser.add_argument("--no-attn-residual", action="store_true")
     parser.add_argument("--pool-method", type=str, default="cls_token")
     parser.add_argument("--no-ppeg", action="store_true")
@@ -212,18 +218,24 @@ def get_args():
     parser.add_argument("--scan", type=str, default="simple")
 
     # Training args
-    parser.add_argument("--train-batch-size", type=int, default=8)
+    parser.add_argument(
+        "--train-batch-size",
+        type=int,
+        nargs="+",
+        default=[8],
+        help="Zipped with train-bag-size, train-batch-size.",
+    )
     parser.add_argument("--val-batch-size", type=int, default=1)
-    parser.add_argument("--learning-rate", type=float, default=5e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.001)
+    parser.add_argument("--learning-rate", type=float, nargs="+", default=[5e-3])
+    parser.add_argument("--weight-decay", type=float, nargs="+", default=[0.001])
     parser.add_argument("--schedule-lr", action="store_true")
     parser.add_argument("--loss-type", type=str, default="cross-entropy")
-    parser.add_argument("--num-epochs", type=int, default=100)
+    parser.add_argument("--num-epochs", type=int, nargs="+", default=[100])
     parser.add_argument("--val-interval", type=int, default=1)
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--stop-criterion", type=str, default="loss")
-    parser.add_argument("--optimizer", type=str, default="SGD")
-    parser.add_argument("--grad-clip", type=float, default=None)
+    parser.add_argument("--optimizer", type=str, nargs="+", default=["SGD"])
+    parser.add_argument("--grad-clip", type=float, nargs="+", default=[None])
     parser.add_argument("--warmup", type=int, default=0)
 
     # Testing args
@@ -231,115 +243,91 @@ def get_args():
         "--test-checkpoint", type=str, default="best", choices=["best", "last"]
     )
 
+    # Seed
+    parser.add_argument(
+        "--seed",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="WARNING This is currently a dummy, seeding is not implemented.",
+    )
+
     # Environment args
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--save-folder",
+        type=str,
+        default="task_id",
+        choices=["task_id", "hashlib_sha256"],
+    )
     parser.add_argument("--num-workers", type=int, default=0)
 
     # Parse all args
     args = parser.parse_args()
+
+    return args
+
+
+def get_hopt_combination(args):
+    """
+    Selects the combination of args for the current run based on the SLURM_ARRAY_TASK_ID environment variable.
+    """
+    array_id = int(os.environ["SLURM_ARRAY_TASK_ID"])
+    hopt_combinations = list(
+        product(
+            list(zip(args.train_subsets, args.val_subsets, args.test_subsets)),
+            list(zip(args.train_bag_size, args.train_batch_size)),
+            list(zip(args.features_dim, args.inner_attention_dim)),
+            args.dropout_strategy,
+            args.dropout,
+            args.num_layers,
+            list(zip(args.dropout_att, args.dropout_class, args.dropout_feat)),
+            args.n_layers,
+            args.learning_rate,
+            args.weight_decay,
+            args.num_epochs,
+            args.grad_clip,
+            args.seed,
+            args.optimizer,
+        )
+    )
+    (
+        (args.train_subsets, args.val_subsets, args.test_subsets),
+        (args.train_bag_size, args.train_batch_size),
+        (args.features_dim, args.inner_attention_dim),
+        args.dropout_strategy,
+        args.dropout,
+        args.num_layers,
+        (args.dropout_att, args.dropout_class, args.dropout_feat),
+        args.n_layers,
+        args.learning_rate,
+        args.weight_decay,
+        args.num_epochs,
+        args.grad_clip,
+        args.seed,
+        args.optimizer,
+    ) = hopt_combinations[array_id]
 
     if args.grad_clip is not None and args.grad_clip < 0:
         args.grad_clip = None
     if args.ref_value is not None and args.ref_value < 0:
         args.ref_value = None
 
+    if args.save_folder == "hashlib_sha256":
+        config_string = "_".join(f"{str(k)}*{str(v)}" for k, v in vars(args).items())
+        hash_object = hashlib.sha256(config_string.encode())
+        unique_id = hash_object.hexdigest()[:10]
+    else:  # elif args.save_folder == 'task_id':
+        unique_id = str(array_id)
+
+    args.results_dir = os.path.join(args.results_dir, unique_id)
     return args
 
 
-def main(args=None):
-    # Process args and create file structures
-    args = get_args() if args is None else args
-
-    print(json.dumps(vars(args), indent=4))
-    timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
-    save_dir = os.path.join(args.results_dir, timestamp)
-    os.makedirs(save_dir)
-    print(f"Results will be written to: {save_dir}")
-    with open(os.path.join(save_dir, "args.json"), "w") as f:
-        json.dump(vars(args), f, indent=4)
-
-    # Set up environment
-    device = torch.device(args.device)
-    tb_writer = SummaryWriter(save_dir)
-
-    # Apply split balancing if requested
-    if args.balance_key:
-        df_split = pd.read_csv(args.split_path)
-        df_split["subset"] = df_split["subset"].astype(str)
-        df_metadata_case = pd.DataFrame()
-        for idx, metadata_dir in enumerate(args.metadata_dirs):
-            df_ = pd.read_csv(os.path.join(metadata_dir, "case_metadata.csv"))
-            df_.insert(0, "source_id", idx)
-            df_metadata_case = pd.concat(
-                [df_metadata_case, df_], axis=0, ignore_index=True
-            )
-        df_metasplit = pd.merge(
-            df_split, df_metadata_case[["case_id", args.balance_key]], on="case_id"
-        )
-        # todo: balance labels is not tested for survival
-        df_split_bal = balance_labels(
-            df_metasplit,
-            label_cols=args.targets,
-            subsets=args.train_subsets,
-            group_key=args.balance_key,
-            strategy="drop",
-            seed=None,
-        )[df_split.keys()]
-        args.split_path = os.path.join(save_dir, "split.csv")
-        df_split_bal.to_csv(args.split_path)
-
-    # Set up dataset structures
-    train_dataset, train_loader, val_dataset, val_loader, test_dataset, test_loader = (
-        DatasetFactory.build(vars(args), vars(args))
-    )
-    if args.head_type == "survival":
-        np.save(
-            os.path.join(save_dir, "survival_bins.npy"), train_dataset.survival_bins
-        )
-
-    if args.head_type == "regression":
-        if args.ref_value is None:
-            args.ref_value = (
-                train_dataset.split_metadata[train_dataset.label_cols].median().item()
-            )
-        with open(os.path.join(save_dir, "ref_value.json"), "w") as f:
-            json.dump(args.ref_value, f)
-
-    # Set up model and classifier
-    model, classifier = ModelFactory.build(vars(args), device)
-
-    # Set up callback
-    callback = Callback(
-        schedule_lr=args.schedule_lr,
-        checkpoint_epoch=args.val_interval,
-        path_checkpoints=save_dir,
-        stop_criterion=args.stop_criterion,
-        early_stop=args.early_stopping,
-    )
-
-    learner = TrainTestExecutor(
-        model=model, callback=callback, model_args=vars(args), explanation_args=None
-    )
-
-    learner.train(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        classifier=classifier,
-        tb_writer=tb_writer,
-    )
-
-    print(f"Test set evaluation with checkpoint: {args.test_checkpoint}")
-    learner.test(
-        test_loader=test_loader,
-        classifier=classifier,
-        xmodel=None,
-        tb_writer=tb_writer,
-        checkpoint=args.test_checkpoint,
-    )
-
-    # Clean up
-    tb_writer.close()
-    print("Finished model training")
+def main():
+    args = get_args()
+    args = get_hopt_combination(args)
+    train(args)
 
 
 if __name__ == "__main__":

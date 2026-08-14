@@ -1,0 +1,17 @@
+Bootstrap: docker
+From: python:3.10-slim
+
+%files
+    pip_requirements_base.txt pip_requirements.txt
+
+%post
+    chmod 1777 /tmp # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
+
+    apt-get update && apt-get install -y --no-install-recommends \
+        libopenslide0 \
+        openslide-tools \
+     && rm -rf /var/lib/apt/lists/*
+
+    pip install --root-user-action=ignore torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+
+    pip install --no-cache-dir -r pip_requirements.txt

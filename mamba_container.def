@@ -1,0 +1,27 @@
+Bootstrap: docker
+From: continuumio/miniconda3
+
+%files
+    $PWD/pip_requirements_mamba.txt pip_requirements.txt
+
+%post
+    chmod 1777 /tmp # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
+
+    # openslide-tools for openslide-python
+    apt update -y
+    apt install openslide-tools -y
+
+    conda update -n base -c defaults conda -y
+    conda create -n myenv python=3.10
+
+    # nvcc for mamba-ssm
+    conda run --no-capture-output -n myenv conda install cuda -c nvidia
+
+    # torch and torchvision with cuda
+    conda run --no-capture-output -n myenv pip install --root-user-action=ignore torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+
+    conda run --no-capture-output -n myenv pip install --root-user-action=ignore -r pip_requirements.txt
+
+    # Source environment at runtime
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> $SINGULARITY_ENVIRONMENT
+    echo "conda activate myenv" >> $SINGULARITY_ENVIRONMENT

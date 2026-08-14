@@ -36,7 +36,7 @@ Accepted as a poster presentation at NeurIPS 2024.
 </details>
 
 <p align="center">
-  <img src="xMIL.png"/>
+  <img src="overview_fig.png"/>
 </p>
 
 
