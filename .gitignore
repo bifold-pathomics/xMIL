@@ -9,6 +9,5 @@ build/
 dist/
 results/
 outputs/
-jobs_slurm/
 logs/
 .codex
