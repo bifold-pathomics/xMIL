@@ -3,7 +3,11 @@ from xmil.models.attention_mil import (
     xAttentionMIL,
 )
 from xmil.models.transmil import TransMIL, xTransMIL
-from xmil.models.additive_mil import get_additive_mil_model, DefaultMILGraph, xAdditiveMIL
+from xmil.models.additive_mil import (
+    get_additive_mil_model,
+    DefaultMILGraph,
+    xAdditiveMIL,
+)
 from xmil.models.mamba_mil import MambaMILModel, xMambaMIL
 from xmil.models.utils import ModelEngine
 
