@@ -4,6 +4,10 @@ From: continuumio/miniconda3
 %files
     requirements/base.txt /requirements/base.txt
     requirements/mamba.txt /requirements/mamba.txt
+    pyproject.toml /opt/xmil/pyproject.toml
+    README.md /opt/xmil/README.md
+    LICENSE /opt/xmil/LICENSE
+    src /opt/xmil/src
 
 %post
     chmod 1777 /tmp # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
@@ -22,6 +26,8 @@ From: continuumio/miniconda3
     conda run --no-capture-output -n myenv pip install --root-user-action=ignore torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
 
     conda run --no-capture-output -n myenv pip install --root-user-action=ignore -r /requirements/mamba.txt
+
+    conda run --no-capture-output -n myenv pip install --root-user-action=ignore --no-deps /opt/xmil
 
     # Source environment at runtime
     echo ". /opt/conda/etc/profile.d/conda.sh" >> $SINGULARITY_ENVIRONMENT

@@ -47,54 +47,70 @@ and four real-world histopathology datasets.
 
 ## Usage
 
+Install the dependencies and xMIL package from the repository root:
+
+```bash
+bash install_requirements.sh
+```
+
+For development, the package can also be installed directly after installing the
+required dependencies:
+
+```bash
+python -m pip install --no-deps -e .
+```
+
+Run the commands and shell examples below from the repository root so their
+relative paths resolve consistently.
+
 ### Models
 The two models with their implementation of xMIL-LRP available in this repository are: **Attention MIL** and **TransMIL**.  
 Additionally, you can perform the training on your data with Additive MIL. 
 The implementation of the models 
-can be found under the module ```models```.
+can be found under the module ```xmil.models```.
 
 ### Model training
-The script ```train.py``` should be used for model training. A template bash script for running ```train.py``` 
+The script ```scripts/train.py``` should be used for model training. A template bash script for running ```scripts/train.py```
 is provided in ```scripts/examples/train_<model_name>_template.sh``` with ```model_name``` being either ```attnmil```
 or ```transmil```. The classifier class for each model is implemented in the respective module. 
 
-The training tools can be found under ```training```.
+The training tools can be found under ```xmil.training```.
 
 ### Toy experiments
 We introduce novel toy experiments for benchmarking explanation methods in complex context-sensitive scenarios. 
-The related tools and classes are under the module ```toy_experiments```. 
-The script ```toy_experiment.py``` should be used for running experiments. 
+The related tools and classes are under the module ```xmil.toy_experiments```.
+The script ```scripts/toy_experiment.py``` should be used for running experiments.
 A template bash script for running experiments is provided in 
 ```scripts/examples/toy_experiment_template.sh```
 
 ### Model explanation
-The module ```xai``` includes the explanation tools. 
-The class ```xMIL``` in ```xai/explanation.py``` is the base class for explaining MIL models.
-The explanation class for each model is implemented in their respective module under ```models``` as ```x<model_name>```,
-for example ```xTransMIL``` in ```models/trainsmil.py```.
+The module ```xmil.xai``` includes the explanation tools.
+The class ```xMIL``` in ```src/xmil/xai/explanation.py``` is the base class for explaining MIL models.
+The explanation class for each model is implemented in its respective module under ```src/xmil/models``` as ```x<model_name>```,
+for example ```xTransMIL``` in ```src/xmil/models/transmil.py```.
 
 For an explanation model ```xmodel```, the main method to get the explanation scores for a ```batch``` is ```xmodel.get_heatmap(batch)```.
 The notebook ```notebooks/slide_visualizations_compute_heatmaps.ipynb``` demonstrates how explanation scores can be computed
 for a slide using a model checkpoint.
 
 ### Testing
-The script ```test.py``` can be used for testing a model checkpoint on a test dataset. 
+The script ```scripts/test.py``` can be used for testing a model checkpoint on a test dataset.
 The test results will be saved under the specified ```results_dir``` as ```test_performance.pt``` and ```test_performance.csv```.
 If specified in the input arguments, the explanation scores will be computed and saved in ```test_prediction.csv```.
-The script ```scripts/examples/test_template.sh``` is a template script for running ```test.py```.
+The script ```scripts/examples/test_template.sh``` is a template script for running ```scripts/test.py```.
 
 ### Visualizing heatmaps
-The module ```visualization/slideshow.py``` includes the tools for visualizing the slides and heatmaps.
+The module ```src/xmil/visualization/slideshow.py``` includes the tools for visualizing the slides and heatmaps.
 Two notebooks ```notebooks/slide_visualizations_*.ipynb``` are provided for demonstrating how to plot the heatmaps.
 ```notebooks/slide_visualizations_precomputed_heatmaps.ipynb``` shows how to perform the visualization when the explanation 
-scores are precomputed. If the explanation scores are not precomputed using ```test.py```, 
+scores are precomputed. If the explanation scores are not precomputed using ```scripts/test.py```,
 the notebook ```notebooks/slide_visualizations_compute_heatmaps.ipynb``` should be used.
 
 ### Faithfulness experiments: Patch flipping
-The class ```xMILEval``` under ```xai/evaluation.py``` is the class for patch flipping evaluation experiments. 
-The script ```evaluate_patch_flipping.py``` is used for performing patch flipping experiments. 
+The class ```xMILEval``` under ```src/xmil/xai/evaluation.py``` is the class for patch flipping evaluation experiments.
+The script ```scripts/evaluation_patch_flipping.py``` is used for performing patch flipping experiments.
 The bash script ```scripts/examples/patch_flipping_template.sh``` is a template of how to run faithfulness experiments
-using ```evaluate_patch_flipping.py```.
+using ```scripts/evaluation_patch_flipping.py```.
 
 ## Reproducibility
 For reproducibility purposes, we share the training configurations, model parameters, and data splits.
@@ -112,7 +128,7 @@ The following file structure is required for using our data loader:
 - A metadata directory containing
   - a file ```case_metadata.csv``` with one row per case and columns for the ```case_id``` and some prediction target column, and
   - a file ```slide_metadata.csv``` with one row per slide and columns for the ```case_id``` and the ```slide_id```.
-- A case-level split created via ```split.py``` of the aforementioned ```case_metadata.csv```.
+- A case-level split created via ```scripts/split.py``` of the aforementioned ```case_metadata.csv```.
 - A patches directory containing a folder per slide with patch files and a ```metadata/df.csv``` file with one row per patch and a column ```patch_id``` identifying all patches.
 - A features directory containing a PyTorch file ```{slide_id}.pt``` per slide, which includes a Tensor of extracted features in the same order as the sorted ```patch_id``` values of this slide (ascending). The shape of each Tensor should be ```(num_patches, num_features)```.
 

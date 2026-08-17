@@ -1,2 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xmil"
+version = "0.1.0"
+description = "Insightful explanations for multiple instance learning in histopathology"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dynamic = ["dependencies"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements/main.txt"] }
+
 [tool.black]
 line-length = 88

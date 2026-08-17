@@ -12,3 +12,6 @@ pip install --root-user-action=ignore torch==2.0.1+cu118 torchvision==0.15.2+cu1
 
 # regular pip requirements
 pip install --root-user-action=ignore -r requirements/main.txt
+
+# install xMIL from the local checkout
+pip install --root-user-action=ignore --no-deps -e .

@@ -5,7 +5,7 @@ base_dir=/path/to/base/dir
 
 # Attention MIL
 
-python3 toy_experiment.py \
+python3 scripts/toy_experiment.py \
 \
 --results-dir ${base_dir}/results/four_bags/attnmil \
 --num-repetitions 30 \
@@ -34,7 +34,7 @@ python3 toy_experiment.py \
 
 # TransMIL
 
-python3 toy_experiment.py \
+python3 scripts/toy_experiment.py \
 \
 --results-dir ${base_dir}/results/pos_neg/transmil \
 --num-repetitions 30 \
@@ -63,7 +63,7 @@ python3 toy_experiment.py \
 
 # Additive MIL
 
-python3 toy_experiment.py \
+python3 scripts/toy_experiment.py \
 \
 --results-dir ${base_dir}/results/adjacent_pairs/addmil \
 --num-repetitions 30 \

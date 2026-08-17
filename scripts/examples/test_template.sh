@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 
-python3 test.py \
+python3 scripts/test.py \
 \
 --model-dir /path/to/trained_model_dir \
 --test-checkpoint best \

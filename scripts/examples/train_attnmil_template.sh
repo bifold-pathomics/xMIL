@@ -8,7 +8,7 @@ weight_decay=0.0
 max_bag_size=24000
 
 
-python3 train.py \
+python3 scripts/train.py \
 \
 --split-path /path/to/tcga/splits/tcga_nsclc_study_60_15_25_0.csv \
 --metadata-dirs /path/to/tcga/luad/metadata/v001 /path/to/tcga/lusc/metadata/v001 \

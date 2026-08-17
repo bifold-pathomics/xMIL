@@ -18,7 +18,7 @@ mkdir "$results_dir"
 explanation_folder=$model_path/explanations
 explanation_path=$explanation_folder/test_predictions.csv
 
-python3 evaluation_patch_flipping.py \
+python3 scripts/evaluation_patch_flipping.py \
 \
 --model-path=$model_path \
 --results-dir="$results_dir" \
