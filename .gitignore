@@ -11,3 +11,4 @@ results/
 outputs/
 logs/
 .codex
+.env
