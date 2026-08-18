@@ -30,7 +30,7 @@ def train_regression_model(
     ref_value,
     metric_name=None,
     n_epoch_val=1,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     metrics_calculator = RegressionPerformanceMetric(metric_name=metric_name)
@@ -38,8 +38,8 @@ def train_regression_model(
     n_train_loader = len(dataloader_train)
     n_val_loader = len(dataloader_val)
 
-    # tensorboard
-    tb_global_step = 0
+    # experiment logging
+    global_step = 0
 
     # initialization of the best model
     best_model = callback.get_model_dict(
@@ -59,6 +59,12 @@ def train_regression_model(
             )
 
         callback.lr_schedule(optimizer, i_epoch, lr_init)
+        callback.log_metrics(
+            logger,
+            metric={"learning_rate": optimizer.param_groups[0]["lr"]},
+            subset="train",
+            step=i_epoch,
+        )
 
         # variables for calculating mean loss and AUC of mini-batches in each epoch
         loss_train, auc_train = 0, 0
@@ -88,18 +94,18 @@ def train_regression_model(
             if verbose and not i_batch % callback.n_batch_verbose:
                 print(f"batch{i_batch} / {n_train_loader} of train")
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss": loss.item()},
                 subset="train",
-                tb_step=tb_global_step,
+                step=global_step,
             )
-            callback.write_to_tensoboard(
-                tb_writer, metric=metrics, subset="train", tb_step=tb_global_step
+            callback.log_metrics(
+                logger, metric=metrics, subset="train", step=global_step
             )
 
-            if tb_writer is not None:
-                tb_global_step += 1
+            if logger is not None:
+                global_step += 1
 
             torch.cuda.empty_cache()
 
@@ -116,14 +122,14 @@ def train_regression_model(
                 f"Epoch {i_epoch}: train loss= {loss_train}, train performance={perf_metrics_tr}"
             )
 
-        callback.write_to_tensoboard(
-            tb_writer,
+        callback.log_metrics(
+            logger,
             metric={"loss/epoch": loss_train},
             subset="train",
-            tb_step=i_epoch,
+            step=i_epoch,
         )
-        callback.write_to_tensoboard(
-            tb_writer, metric=perf_metrics_tr, subset="train", tb_step=i_epoch
+        callback.log_metrics(
+            logger, metric=perf_metrics_tr, subset="train", step=i_epoch
         )
 
         # endregion -------------------
@@ -160,14 +166,14 @@ def train_regression_model(
                     f"Epoch {i_epoch}: validation loss= {loss_val}, validation performance={perf_metrics_val}"
                 )
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss/epoch": loss_val},
                 subset="val",
-                tb_step=i_epoch,
+                step=i_epoch,
             )
-            callback.write_to_tensoboard(
-                tb_writer, metric=perf_metrics_val, subset="val", tb_step=i_epoch
+            callback.log_metrics(
+                logger, metric=perf_metrics_val, subset="val", step=i_epoch
             )
 
             # region save checkpoint and check early stopping ---------------------------
@@ -219,7 +225,7 @@ def train_classification_model(
     callback,
     label_cols,
     n_epoch_val=1,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     n_train_loader = len(dataloader_train)
@@ -235,8 +241,8 @@ def train_classification_model(
     auc_epoch_train, auc_epoch_val = [], []
     loss_epoch_train, loss_epoch_val = [], []
 
-    # tensorboard
-    tb_global_step = 0
+    # experiment logging
+    global_step = 0
 
     # initialization of the best model
     best_model = callback.get_model_dict(
@@ -256,6 +262,12 @@ def train_classification_model(
             )
 
         callback.lr_schedule(optimizer, i_epoch, lr_init)
+        callback.log_metrics(
+            logger,
+            metric={"learning_rate": optimizer.param_groups[0]["lr"]},
+            subset="train",
+            step=i_epoch,
+        )
 
         # variables for calculating mean loss and AUC of mini-batches in each epoch
         loss_train, auc_train = 0, 0
@@ -286,18 +298,18 @@ def train_classification_model(
             if verbose and not i_batch % callback.n_batch_verbose:
                 print(f"batch{i_batch} / {n_train_loader} of train")
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss": loss.item()},
                 subset="train",
-                tb_step=tb_global_step,
+                step=global_step,
             )
-            callback.write_to_tensoboard(
-                tb_writer, metric=metrics, subset="train", tb_step=tb_global_step
+            callback.log_metrics(
+                logger, metric=metrics, subset="train", step=global_step
             )
 
-            if tb_writer is not None:
-                tb_global_step += 1
+            if logger is not None:
+                global_step += 1
             torch.cuda.empty_cache()
 
         # collect the epoch training metrics .......
@@ -310,14 +322,14 @@ def train_classification_model(
         if verbose:
             print(f"Epoch {i_epoch}: train loss= {loss_train}, train AUC={auc_train}")
 
-        callback.write_to_tensoboard(
-            tb_writer,
+        callback.log_metrics(
+            logger,
             metric={"loss/epoch": loss_train},
             subset="train",
-            tb_step=i_epoch,
+            step=i_epoch,
         )
-        callback.write_to_tensoboard(
-            tb_writer, metric=auc_train, subset="train", tb_step=i_epoch
+        callback.log_metrics(
+            logger, metric=auc_train, subset="train", step=i_epoch
         )
         # torch.cuda.empty_cache()
         # endregion -------------------
@@ -351,14 +363,14 @@ def train_classification_model(
                     f"Epoch {i_epoch}: validation loss= {loss_val}, validation AUC={auc_val}"
                 )
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss/epoch": loss_val},
                 subset="val",
-                tb_step=i_epoch,
+                step=i_epoch,
             )
-            callback.write_to_tensoboard(
-                tb_writer, metric=auc_val, subset="val", tb_step=i_epoch
+            callback.log_metrics(
+                logger, metric=auc_val, subset="val", step=i_epoch
             )
         # endregion
 
@@ -419,7 +431,7 @@ def train_survival_model(
     dataloader_val,
     callback,
     n_epoch_val=1,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     n_train_loader = len(dataloader_train)
@@ -435,8 +447,8 @@ def train_survival_model(
     loss_epoch_train, loss_epoch_val = [], []
     c_index_epoch_train, c_index_epoch_val = [], []
 
-    # tensorboard
-    tb_global_step = 0
+    # experiment logging
+    global_step = 0
 
     # initialization of the best model
     best_model = callback.get_model_dict(
@@ -458,6 +470,12 @@ def train_survival_model(
             )
 
         callback.lr_schedule(optimizer, i_epoch, lr_init)
+        callback.log_metrics(
+            logger,
+            metric={"learning_rate": optimizer.param_groups[0]["lr"]},
+            subset="train",
+            step=i_epoch,
+        )
 
         # variables for calculating mean loss and C-Index of mini-batches in each epoch
         loss_train, loss_val, total_loss = 0, 0, 0
@@ -512,18 +530,18 @@ def train_survival_model(
             if verbose and not i_batch % callback.n_batch_verbose:
                 print(f"batch{i_batch} / {n_train_loader} of train")
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss": loss.item()},
                 subset="train",
-                tb_step=tb_global_step,
+                step=global_step,
             )
-            callback.write_to_tensoboard(
-                tb_writer, metric=metrics, subset="train", tb_step=tb_global_step
+            callback.log_metrics(
+                logger, metric=metrics, subset="train", step=global_step
             )
 
-            if tb_writer is not None:
-                tb_global_step += 1
+            if logger is not None:
+                global_step += 1
             torch.cuda.empty_cache()
 
         # collect the epoch training metrics .......
@@ -549,17 +567,17 @@ def train_survival_model(
             loss_epoch_train, loss_train, c_index_epoch_train, c_index_train
         )
 
-        callback.write_to_tensoboard(
-            tb_writer,
+        callback.log_metrics(
+            logger,
             metric={"loss/epoch": total_loss},
             subset="train",
-            tb_step=i_epoch,
+            step=i_epoch,
         )
-        callback.write_to_tensoboard(
-            tb_writer,
+        callback.log_metrics(
+            logger,
             metric={"C-Index": c_index_train},
             subset="train",
-            tb_step=i_epoch,
+            step=i_epoch,
         )
 
         if verbose:
@@ -632,17 +650,17 @@ def train_survival_model(
             if verbose:
                 print(f"Epoch {i_epoch}: validation loss= {loss_val}")
 
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"loss/epoch": loss_val},
                 subset="val",
-                tb_step=i_epoch,
+                step=i_epoch,
             )
-            callback.write_to_tensoboard(
-                tb_writer,
+            callback.log_metrics(
+                logger,
                 metric={"C-Index": c_index_val},
                 subset="val",
-                tb_step=i_epoch,
+                step=i_epoch,
             )
 
         # endregion
@@ -697,7 +715,7 @@ def test_classification_model(
     explanation_types=None,
     save_explanation_vectors=False,
     compute_auc=True,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     model.eval()
@@ -766,10 +784,10 @@ def test_classification_model(
     if verbose:
         print(f"Test loss={loss_test}, test AUC={auc_test}")
 
-    callback.write_to_tensoboard(
-        tb_writer, metric={"loss": loss_test}, subset="test", tb_step=0
+    callback.log_metrics(
+        logger, metric={"loss": loss_test}, subset="test", step=0
     )
-    callback.write_to_tensoboard(tb_writer, metric=auc_test, subset="test", tb_step=0)
+    callback.log_metrics(logger, metric=auc_test, subset="test", step=0)
 
     results = callback.save_test_results_classification(
         auc_test,
@@ -795,7 +813,7 @@ def test_regression_model(
     explanation_types=None,
     save_explanation_vectors=False,
     ref_value=None,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     model.eval()
@@ -854,11 +872,11 @@ def test_regression_model(
         all_targets, all_preds, ref_value
     )
 
-    callback.write_to_tensoboard(
-        tb_writer, metric={"loss": loss_test}, subset="test", tb_step=0
+    callback.log_metrics(
+        logger, metric={"loss": loss_test}, subset="test", step=0
     )
-    callback.write_to_tensoboard(
-        tb_writer, metric=perf_metrics, subset="test", tb_step=0
+    callback.log_metrics(
+        logger, metric=perf_metrics, subset="test", step=0
     )
 
     results = callback.save_test_results_regression(
@@ -883,7 +901,7 @@ def test_survival_model(
     xmodel=None,
     explanation_types=None,
     save_explanation_vectors=False,
-    tb_writer=None,
+    logger=None,
     verbose=False,
 ):
     model.eval()
@@ -966,11 +984,11 @@ def test_survival_model(
     if verbose:
         print(f"Test loss={loss_test}, test C-index={c_index_test}")
 
-    callback.write_to_tensoboard(
-        tb_writer, metric={"loss": loss_test}, subset="test", tb_step=0
+    callback.log_metrics(
+        logger, metric={"loss": loss_test}, subset="test", step=0
     )
-    callback.write_to_tensoboard(
-        tb_writer, metric={"C-Index": c_index_test}, subset="test", tb_step=0
+    callback.log_metrics(
+        logger, metric={"C-Index": c_index_test}, subset="test", step=0
     )
 
     results = callback.save_test_results_survival(

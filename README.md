@@ -63,6 +63,30 @@ python -m pip install --no-deps -e .
 Run the commands and shell examples below from the repository root so their
 relative paths resolve consistently.
 
+### Experiment logging
+
+Training uses Weights & Biases by default and stores runs offline so no data is
+uploaded unexpectedly. To log directly to a W&B project, authenticate once and
+enable online mode:
+
+```bash
+wandb login
+python3 scripts/train.py \
+  --wandb-mode online \
+  --wandb-project xmil \
+  [training arguments]
+```
+
+Optional W&B arguments include `--wandb-entity`, `--wandb-run-name`,
+`--wandb-group`, and `--wandb-tags`. Model gradients or parameters can be logged
+with `--wandb-watch gradients`, `parameters`, or `all`.
+
+To retain the existing TensorBoard behavior instead, pass:
+
+```bash
+python3 scripts/train.py --logging-backend tensorboard [training arguments]
+```
+
 ### Models
 The two models with their implementation of xMIL-LRP available in this repository are: **Attention MIL** and **TransMIL**.  
 Additionally, you can perform the training on your data with Additive MIL. 

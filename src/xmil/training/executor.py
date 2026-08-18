@@ -17,7 +17,7 @@ class TrainTestExecutor:
         self.model = model
         self.callback = callback
 
-    def train(self, train_loader, val_loader, classifier, tb_writer=None):
+    def train(self, train_loader, val_loader, classifier, logger=None):
         print("training ...")
         if self.model_args["head_type"] == "survival":
             train_survival_model(
@@ -30,7 +30,7 @@ class TrainTestExecutor:
                 dataloader_val=val_loader,
                 callback=self.callback,
                 n_epoch_val=self.model_args["val_interval"],
-                tb_writer=tb_writer,
+                logger=logger,
                 verbose=False,
             )
 
@@ -47,7 +47,7 @@ class TrainTestExecutor:
                 ref_value=self.model_args["ref_value"],
                 metric_name=self.model_args["metric_name"],
                 n_epoch_val=self.model_args["val_interval"],
-                tb_writer=tb_writer,
+                logger=logger,
                 verbose=False,
             )
 
@@ -63,14 +63,14 @@ class TrainTestExecutor:
                 callback=self.callback,
                 label_cols=self.model_args["targets"],
                 n_epoch_val=self.model_args["val_interval"],
-                tb_writer=tb_writer,
+                logger=logger,
                 verbose=False,
             )
         else:
             raise NotImplementedError()
 
     def test(
-        self, test_loader, classifier, xmodel=None, tb_writer=None, checkpoint=None
+        self, test_loader, classifier, xmodel=None, logger=None, checkpoint=None
     ):
 
         if test_loader is None:
@@ -89,7 +89,7 @@ class TrainTestExecutor:
                 callback=self.callback,
                 xmodel=xmodel,
                 explanation_types=self.explanation_args.get("explanation_types", None),
-                tb_writer=tb_writer,
+                logger=logger,
                 verbose=False,
             )
 
@@ -105,7 +105,7 @@ class TrainTestExecutor:
                     "save_vectors", False
                 ),
                 ref_value=self.model_args["ref_value"],
-                tb_writer=tb_writer,
+                logger=logger,
             )
 
         elif self.model_args["head_type"] == "classification":
@@ -122,7 +122,7 @@ class TrainTestExecutor:
                     "save_vectors", False
                 ),
                 compute_auc=(not self.explanation_args.get("not_compute_auc", False)),
-                tb_writer=tb_writer,
+                logger=logger,
                 verbose=False,
             )
         else:

@@ -74,14 +74,14 @@ class Callback:
             i += 2
 
     @staticmethod
-    def write_to_tensoboard(tb_writer, metric, subset, tb_step=0):
-        if tb_writer is None:
+    def log_metrics(logger, metric, subset, step=0):
+        if logger is None:
             return
         for key, val in metric.items():
             if isinstance(val, torch.Tensor):
                 val = val.item()
             if val is not None:
-                tb_writer.add_scalar(f"{key}/{subset}", val, tb_step)
+                logger.log_scalar(f"{key}/{subset}", val, step)
 
     def get_best_model(
         self,

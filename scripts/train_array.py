@@ -5,6 +5,7 @@ from itertools import product
 import hashlib
 
 from train import main as train
+from xmil.training import add_logging_arguments
 
 
 def get_args():
@@ -261,6 +262,8 @@ def get_args():
         choices=["task_id", "hashlib_sha256"],
     )
     parser.add_argument("--num-workers", type=int, default=0)
+
+    add_logging_arguments(parser)
 
     # Parse all args
     args = parser.parse_args()

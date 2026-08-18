@@ -6,12 +6,16 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 from xmil.splits import balance_labels
 from xmil.datasets import DatasetFactory
 from xmil.models import ModelFactory
-from xmil.training import TrainTestExecutor, Callback
+from xmil.training import (
+    Callback,
+    TrainTestExecutor,
+    add_logging_arguments,
+    build_experiment_logger,
+)
 
 
 def get_args():
@@ -235,6 +239,8 @@ def get_args():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--num-workers", type=int, default=0)
 
+    add_logging_arguments(parser)
+
     # Parse all args
     args = parser.parse_args()
 
@@ -260,7 +266,11 @@ def main(args=None):
 
     # Set up environment
     device = torch.device(args.device)
-    tb_writer = SummaryWriter(save_dir)
+    logger = build_experiment_logger(
+        backend=args.logging_backend,
+        log_dir=save_dir,
+        config=vars(args),
+    )
 
     # Apply split balancing if requested
     if args.balance_key:
@@ -307,6 +317,7 @@ def main(args=None):
 
     # Set up model and classifier
     model, classifier = ModelFactory.build(vars(args), device)
+    logger.watch(model)
 
     # Set up callback
     callback = Callback(
@@ -325,7 +336,7 @@ def main(args=None):
         train_loader=train_loader,
         val_loader=val_loader,
         classifier=classifier,
-        tb_writer=tb_writer,
+        logger=logger,
     )
 
     print(f"Test set evaluation with checkpoint: {args.test_checkpoint}")
@@ -333,12 +344,12 @@ def main(args=None):
         test_loader=test_loader,
         classifier=classifier,
         xmodel=None,
-        tb_writer=tb_writer,
+        logger=logger,
         checkpoint=args.test_checkpoint,
     )
 
     # Clean up
-    tb_writer.close()
+    logger.close()
     print("Finished model training")
 
 
