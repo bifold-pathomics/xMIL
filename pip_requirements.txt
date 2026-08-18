@@ -8,11 +8,14 @@ openslide-python==1.4.3
 seaborn==0.12.2
 matplotlib==3.8.2
 tensorboard==2.12.1
+wandb==0.25.1
 jupyter==1.0.0
 ipykernel==6.22.0
 captum==0.7.0
 mamba-ssm==2.2.2
 causal-conv1d==1.4.0
+# Compatibility with mamba-ssm 2.2.2 generation imports.
+transformers==4.40.0
 scikit-survival==0.23.0
 lifelines==0.29.0
 openpyxl==3.1.5

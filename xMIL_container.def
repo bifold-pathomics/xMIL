@@ -2,8 +2,8 @@ Bootstrap: docker
 From: continuumio/miniconda3
 
 %files
-    requirements/base.txt /requirements/base.txt
-    requirements/mamba.txt /requirements/mamba.txt
+    pip_requirements.txt /pip_requirements.txt
+    pip_requirements.txt /opt/xmil/pip_requirements.txt
     pyproject.toml /opt/xmil/pyproject.toml
     README.md /opt/xmil/README.md
     LICENSE /opt/xmil/LICENSE
@@ -25,8 +25,16 @@ From: continuumio/miniconda3
     # torch and torchvision with cuda
     conda run --no-capture-output -n myenv pip install --root-user-action=ignore torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
 
-    conda run --no-capture-output -n myenv pip install --root-user-action=ignore -r /requirements/mamba.txt
+    # torch==2.0.1's cpp_extension imports pkg_resources, which newer setuptools
+    # (>=81) no longer ships - pin to a version that still has it.
+    conda run --no-capture-output -n myenv pip install --root-user-action=ignore "setuptools<81"
 
+    # mamba-ssm and causal-conv1d import torch in their setup.py at build time,
+    # so they must be built without pip's isolated build env (which lacks the
+    # already-installed pinned torch) - see mamba-ssm README.
+    conda run --no-capture-output -n myenv pip install --root-user-action=ignore --no-build-isolation -r /pip_requirements.txt
+
+    # Install the xMIL package without resolving its dependencies a second time.
     conda run --no-capture-output -n myenv pip install --root-user-action=ignore --no-deps /opt/xmil
 
     # Source environment at runtime

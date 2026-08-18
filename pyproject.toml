@@ -15,7 +15,7 @@ dynamic = ["dependencies"]
 where = ["src"]
 
 [tool.setuptools.dynamic]
-dependencies = { file = ["requirements/main.txt"] }
+dependencies = { file = ["pip_requirements.txt"] }
 
 [tool.black]
 line-length = 88
