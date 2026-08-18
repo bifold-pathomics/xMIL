@@ -36,7 +36,8 @@ From: continuumio/miniconda3
 
     # Install the xMIL package without resolving its dependencies a second time.
     conda run --no-capture-output -n myenv pip install --root-user-action=ignore --no-deps /opt/xmil
-
+    conda clean -afy
+    rm -rf /root/.cache/pip
     # Source environment at runtime
     echo ". /opt/conda/etc/profile.d/conda.sh" >> $SINGULARITY_ENVIRONMENT
     echo "conda activate myenv" >> $SINGULARITY_ENVIRONMENT

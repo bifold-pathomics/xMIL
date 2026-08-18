@@ -47,6 +47,8 @@ and four real-world histopathology datasets.
 
 ## Usage
 
+** for building the container with apptainer, you need a node with larger memory capacity.**
+
 Install the dependencies and xMIL package from the repository root:
 
 ```bash
