@@ -69,9 +69,7 @@ class TrainTestExecutor:
         else:
             raise NotImplementedError()
 
-    def test(
-        self, test_loader, classifier, xmodel=None, logger=None, checkpoint=None
-    ):
+    def test(self, test_loader, classifier, xmodel=None, logger=None, checkpoint=None):
 
         if test_loader is None:
             return

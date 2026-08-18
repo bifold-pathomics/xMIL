@@ -286,9 +286,7 @@ def main(args=None):
     )
 
     print(f"Test set evaluation with checkpoint: {checkpoint}")
-    learner.test(
-        test_loader, classifier, xmodel=xmodel, logger=None, checkpoint=None
-    )
+    learner.test(test_loader, classifier, xmodel=xmodel, logger=None, checkpoint=None)
 
 
 if __name__ == "__main__":

@@ -328,9 +328,7 @@ def train_classification_model(
             subset="train",
             step=i_epoch,
         )
-        callback.log_metrics(
-            logger, metric=auc_train, subset="train", step=i_epoch
-        )
+        callback.log_metrics(logger, metric=auc_train, subset="train", step=i_epoch)
         # torch.cuda.empty_cache()
         # endregion -------------------
 
@@ -369,9 +367,7 @@ def train_classification_model(
                 subset="val",
                 step=i_epoch,
             )
-            callback.log_metrics(
-                logger, metric=auc_val, subset="val", step=i_epoch
-            )
+            callback.log_metrics(logger, metric=auc_val, subset="val", step=i_epoch)
         # endregion
 
         # region save checkpoint and check early stopping ---------------------------
@@ -784,9 +780,7 @@ def test_classification_model(
     if verbose:
         print(f"Test loss={loss_test}, test AUC={auc_test}")
 
-    callback.log_metrics(
-        logger, metric={"loss": loss_test}, subset="test", step=0
-    )
+    callback.log_metrics(logger, metric={"loss": loss_test}, subset="test", step=0)
     callback.log_metrics(logger, metric=auc_test, subset="test", step=0)
 
     results = callback.save_test_results_classification(
@@ -872,12 +866,8 @@ def test_regression_model(
         all_targets, all_preds, ref_value
     )
 
-    callback.log_metrics(
-        logger, metric={"loss": loss_test}, subset="test", step=0
-    )
-    callback.log_metrics(
-        logger, metric=perf_metrics, subset="test", step=0
-    )
+    callback.log_metrics(logger, metric={"loss": loss_test}, subset="test", step=0)
+    callback.log_metrics(logger, metric=perf_metrics, subset="test", step=0)
 
     results = callback.save_test_results_regression(
         perf_metrics,
@@ -984,9 +974,7 @@ def test_survival_model(
     if verbose:
         print(f"Test loss={loss_test}, test C-index={c_index_test}")
 
-    callback.log_metrics(
-        logger, metric={"loss": loss_test}, subset="test", step=0
-    )
+    callback.log_metrics(logger, metric={"loss": loss_test}, subset="test", step=0)
     callback.log_metrics(
         logger, metric={"C-Index": c_index_test}, subset="test", step=0
     )
