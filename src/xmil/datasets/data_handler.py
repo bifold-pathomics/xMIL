@@ -182,7 +182,9 @@ class SlideDataHandler:
                 features = features[vec_idx]
         elif os.path.exists(f"{path}.pt"):  # TODO implement sorting by json file
             features = torch.load(f"{path}.pt").squeeze()
-            features = features.reshape(-1, features.shape[-1]) # this is added to prevent error when there is only one patch and the shape of features is (num_features,) instead of (1, num_features)
+            features = features.reshape(
+                -1, features.shape[-1]
+            )  # this is added to prevent error when there is only one patch and the shape of features is (num_features,) instead of (1, num_features)
             if feature_indices is not None:
                 features = features[feature_indices]
         else:
