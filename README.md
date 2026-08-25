@@ -83,6 +83,13 @@ Optional W&B arguments include `--wandb-entity`, `--wandb-run-name`,
 `--wandb-group`, and `--wandb-tags`. Model gradients or parameters can be logged
 with `--wandb-watch gradients`, `parameters`, or `all`.
 
+For classification, W&B summaries follow the checkpoint criterion. AUC-selected
+runs include `auc/val.max`, `loss/val.at_auc_max`, and `epoch/auc_val_max`;
+loss-selected runs include `loss/val.min`, `auc/val.at_loss_min`, and
+`epoch/loss_val_min`. Criterion-independent `auc/val.selected`,
+`loss/val.selected`, and `epoch/selected` values are also recorded. These values
+come from the saved best checkpoint rather than the final validation epoch.
+
 To retain the existing TensorBoard behavior instead, pass:
 
 ```bash

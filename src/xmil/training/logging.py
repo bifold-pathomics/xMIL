@@ -41,6 +41,9 @@ class TensorBoardLogger:
     def log_scalar(self, name, value, step):
         self.writer.add_scalar(name, value, step)
 
+    def set_summary(self, metrics):
+        pass
+
     def watch(self, model):
         pass
 
@@ -93,6 +96,10 @@ class WandbLogger:
             self.run.define_metric(name, step_metric=step_name)
             self.defined_metrics.add(name)
         self.run.log({name: value, step_name: step})
+
+    def set_summary(self, metrics):
+        for name, value in metrics.items():
+            self.run.summary[name] = value
 
     def watch(self, model):
         if self.watch_mode != "none":

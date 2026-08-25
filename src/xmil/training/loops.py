@@ -386,6 +386,7 @@ def train_classification_model(
                 model.state_dict(),
                 best_model,
                 return_args=True,
+                logger=logger,
             )
             callback.early_stopping(i_epoch)
         if callback.stop:
@@ -410,6 +411,7 @@ def train_classification_model(
             best_model,
             last_model=True,
             return_args=True,
+            logger=logger,
         )
 
     # endregion

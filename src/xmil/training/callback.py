@@ -154,6 +154,51 @@ class Callback:
         model_dict["optimizer_state_dict"] = copy.deepcopy(optimizer_state_dict)
         return model_dict
 
+    def log_selected_classification_summary(self, logger, best_model):
+        """Log metrics from the epoch selected for the best checkpoint."""
+        if logger is None:
+            return
+
+        auc_values = best_model["perf_metric_val"]
+        if isinstance(auc_values, dict):
+            if "auc" in auc_values:
+                selected_auc = auc_values["auc"]
+            elif self.stop_criterion in auc_values:
+                selected_auc = auc_values[self.stop_criterion]
+            else:
+                selected_auc = np.mean(list(auc_values.values()))
+        else:
+            selected_auc = auc_values
+
+        if isinstance(selected_auc, torch.Tensor):
+            selected_auc = selected_auc.item()
+        selected_auc = float(selected_auc)
+        selected_loss = float(best_model["loss_val"])
+        selected_epoch = int(best_model["epoch"])
+
+        summary = {
+            "auc/val.selected": selected_auc,
+            "loss/val.selected": selected_loss,
+            "epoch/selected": selected_epoch,
+        }
+        if self.stop_criterion == "loss":
+            summary.update(
+                {
+                    "loss/val.min": selected_loss,
+                    "auc/val.at_loss_min": selected_auc,
+                    "epoch/loss_val_min": selected_epoch,
+                }
+            )
+        else:
+            summary.update(
+                {
+                    "auc/val.max": selected_auc,
+                    "loss/val.at_auc_max": selected_loss,
+                    "epoch/auc_val_max": selected_epoch,
+                }
+            )
+        logger.set_summary(summary)
+
     def make_checkpoint_backward_compatible(self, checkpoint_state_dict, model):
 
         # Filter parameters according to use_ppeg
@@ -201,6 +246,7 @@ class Callback:
         best_model,
         last_model=False,
         return_args=False,
+        logger=None,
     ):
         performance = dict()
         performance["auc_all_train"] = auc_all_train
@@ -228,6 +274,7 @@ class Callback:
             torch.save(best_model, name_save)
             name_save = os.path.join(self.path_checkpoints, f"best_performance.pt")
             torch.save(performance, name_save)
+            self.log_selected_classification_summary(logger, best_model)
 
         if last_model:
             last_model = self.get_model_dict(
