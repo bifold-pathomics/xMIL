@@ -34,6 +34,7 @@ class MILSlideDataset(Dataset):
         survival=False,
         survival_bins=None,
         reference_target=0,
+        continuous=False,
     ):
         super(MILSlideDataset, self).__init__()
         # Save args
@@ -45,6 +46,7 @@ class MILSlideDataset(Dataset):
         self.sort_sampled_patches = sort_sampled_patches
         self.survival = survival
         self.survival_bins = survival_bins
+        self.continuous = continuous
 
         # Load metadata, slide data, and match them
         print(f"Loading dataset for subsets: {subsets}")
@@ -184,7 +186,9 @@ class MILSlideDataset(Dataset):
             )
             - self.reference_target
         )
-        if not self.survival:
+        if (
+            not self.continuous
+        ):  # head_type = classification <=> head_type != regression | survival
             targets = targets.long()
 
         # Load (filtered) features

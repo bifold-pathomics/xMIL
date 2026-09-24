@@ -120,6 +120,7 @@ class DatasetFactory:
             min_bag_size=args.get("min_bag_size", 0),
             survival=(args.get("head_type", "classification") == "survival"),
             survival_bins=args.get("survival_bins", None),
+            continuous=(args.get("head_type", "classification") != "classification"),
         )
 
         return dataset
