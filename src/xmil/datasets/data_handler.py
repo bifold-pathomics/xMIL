@@ -207,7 +207,13 @@ class SlideDataHandler:
         return patch_metadata
 
     @staticmethod
-    def load_features(path, feature_indices=None, patch_ids=None, data_format="legacy"):
+    def load_features(
+        path,
+        feature_indices=None,
+        patch_ids=None,
+        data_format="legacy",
+        virchow2_cls_only=False,
+    ):
         """
         Loads features of one slide into RAM. Pass feature_indices or patch ids to only load selected features.
 
@@ -216,11 +222,24 @@ class SlideDataHandler:
         :param patch_ids: (torch.Tensor) Selected patch IDs to load (for features saved in dict-style).
         :return: (torch.Tensor) The feature vectors of shape (num_patches, num_features).
         """
+        if virchow2_cls_only and data_format != "trident":
+            raise ValueError("virchow2_cls_only requires TRIDENT input.")
         if data_format == "trident":
             import h5py
 
             with h5py.File(f"{path}.h5", "r") as file:
-                features = torch.from_numpy(file["features"][:]).float()
+                dataset = file["features"]
+                if virchow2_cls_only:
+                    if (
+                        dataset.attrs.get("encoder") != "virchow2"
+                        or dataset.shape[1] != 2560
+                    ):
+                        raise ValueError(
+                            "CLS selection requires 2560-dimensional TRIDENT virchow2 features."
+                        )
+                    features = torch.from_numpy(dataset[:, :1280]).float()
+                else:
+                    features = torch.from_numpy(dataset[:]).float()
             if feature_indices is not None:
                 features = features[feature_indices]
             return features

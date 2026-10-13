@@ -35,6 +35,7 @@ class MILSlideDataset(Dataset):
         survival_bins=None,
         reference_target=0,
         data_format="legacy",
+        virchow2_cls_only=False,
     ):
         super(MILSlideDataset, self).__init__()
         # Save args
@@ -44,6 +45,9 @@ class MILSlideDataset(Dataset):
         if data_format not in {"legacy", "trident"}:
             raise ValueError(f"Unknown data format: {data_format}")
         self.data_format = data_format
+        if virchow2_cls_only and data_format != "trident":
+            raise ValueError("virchow2_cls_only requires TRIDENT input.")
+        self.virchow2_cls_only = virchow2_cls_only
         self.label_cols = label_cols
         self.num_targets = len(self.label_cols)
         self.sort_sampled_patches = sort_sampled_patches
@@ -146,6 +150,7 @@ class MILSlideDataset(Dataset):
                         self.feature_indices[idx],
                         self.patch_ids[idx],
                         data_format=self.data_format,
+                        virchow2_cls_only=self.virchow2_cls_only,
                     )
                 )
         else:
@@ -213,6 +218,7 @@ class MILSlideDataset(Dataset):
                 self.feature_indices[idx],
                 self.patch_ids[idx],
                 data_format=self.data_format,
+                virchow2_cls_only=self.virchow2_cls_only,
             )
         else:
             features = self.features[idx]

@@ -151,3 +151,30 @@ def test_real_sample():
     np.testing.assert_array_equal(grid * footprint, expected)
     assert features.shape == (len(expected), 2560)
     assert torch.isfinite(features).all()
+
+
+@pytest.mark.parametrize("preload", [False, True])
+def test_virchow2_cls_only(inputs, tmp_path, preload):
+    features = np.arange(3 * 2560, dtype=np.float32).reshape(3, 2560)
+    with h5py.File(tmp_path / "slide.h5", "a") as file:
+        del file["features"]
+        file["features"] = features
+        file["features"].attrs["encoder"] = "virchow2"
+    ds = MILSlideDataset(
+        **inputs, virchow2_cls_only=True, preload_features=preload, bag_size=2
+    )
+    item = ds[0]
+    np.testing.assert_array_equal(
+        item["features"].numpy(), features[item["patch_ids"].numpy(), :1280]
+    )
+    with h5py.File(tmp_path / "slide.h5") as file:
+        np.testing.assert_array_equal(file["features"][:], features)
+    full = MILSlideDataset(**inputs)[0]
+    np.testing.assert_array_equal(full["features"].numpy(), features)
+
+
+def test_cls_rejects_other_encoder(inputs):
+    with pytest.raises(ValueError, match="2560-dimensional"):
+        MILSlideDataset(**inputs, virchow2_cls_only=True)[0]
+    with pytest.raises(ValueError, match="requires TRIDENT"):
+        MILSlideDataset(**{**inputs, "data_format": "legacy"}, virchow2_cls_only=True)

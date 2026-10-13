@@ -249,3 +249,21 @@ PYTHONPATH=src python -m pytest tests/test_trident.py
 # Optionally include a real Virchow2 feature file:
 TRIDENT_SAMPLE=/path/to/slide.h5 PYTHONPATH=src python -m pytest tests/test_trident.py
 ```
+
+#### Compare Virchow2 CLS against CLS + mean patch tokens
+
+Keep the full 2560-dimensional TRIDENT `virchow2` HDF5 files for both experiments:
+
+```bash
+# Default: class token + mean patch tokens
+--data-format trident --input-dim 2560
+
+# Class token only, read directly from the first half of the same files
+--data-format trident --virchow2-cls-only --input-dim 1280
+```
+
+The flag applies to both preloaded and on-demand features and leaves patch IDs,
+coordinates, and source files unchanged. It requires the HDF5 encoder attribute
+`virchow2` and 2560 input columns. Testing and visualization inherit the saved
+training setting; use the matching trained model for each experiment. Older
+runs without the option continue to use all feature dimensions.

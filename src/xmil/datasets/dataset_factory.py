@@ -109,6 +109,7 @@ class DatasetFactory:
             subsets=subsets,
             patches_dirs=args.get("patches_dirs"),
             data_format=args.get("data_format", "legacy"),
+            virchow2_cls_only=args.get("virchow2_cls_only", False),
             features_dirs=args["features_dirs"],
             label_cols=args.get("targets", ["label"]),
             bag_size=bag_size,

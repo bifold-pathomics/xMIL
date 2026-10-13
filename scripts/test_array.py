@@ -27,6 +27,12 @@ def get_args():
     parser.add_argument("--metadata-dirs", type=str, nargs="+", default=None)
     parser.add_argument("--patches-dirs", type=str, nargs="+", default=None)
     parser.add_argument("--data-format", choices=["legacy", "trident"], default=None)
+    parser.add_argument(
+        "--virchow2-cls-only",
+        action="store_true",
+        default=None,
+        help="Use the first 1280 dimensions of TRIDENT Virchow2 embeddings (set --input-dim 1280 for training).",
+    )
     parser.add_argument("--features-dirs", type=str, nargs="+", default=None)
 
     # Dataset args
