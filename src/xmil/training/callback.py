@@ -366,6 +366,7 @@ class Callback:
         best_model,
         last_model=False,
         return_args=False,
+        logger=None,
     ):
 
         performance = dict()
@@ -412,6 +413,12 @@ class Callback:
             torch.save(
                 performance, os.path.join(self.path_checkpoints, f"best_performance.pt")
             )
+            if logger is not None:
+                logger.set_summary({
+                    "C-Index/val.selected": float(best_model["perf_metric_val"]),
+                    "loss/val.selected": float(best_model["loss_val"]),
+                    "epoch/selected": int(best_model["epoch"]),
+                })
 
         if last_model:
             last_model = self.get_model_dict(

@@ -694,6 +694,7 @@ def train_survival_model(
                 best_model,
                 last_model=(i_epoch == n_epochs - 1),
                 return_args=True,
+                logger=logger,
             )
             callback.early_stopping(i_epoch)
         if callback.stop:
