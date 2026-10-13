@@ -201,3 +201,51 @@ If you find our codes useful in your work, please cite us:
 :copyright: This code is provided under the MIT License. Please refer to the license file for details.
 
 Note: the license was updated from CC BY-NC-ND 4.0 in April 2026.
+
+### Native TRIDENT inputs
+
+Use `--data-format trident` and point `--features-dirs` at TRIDENT's
+`20x_256px_0px_overlap/features_virchow2` directory. It must contain one
+`<slide_id>.h5` per slide, with `features`, `coords`, and TRIDENT's coordinate
+attributes. `--patches-dirs` is unnecessary for this format. Case metadata,
+slide metadata, and split CSVs retain their existing xMIL schemas.
+
+Add these options to your normal training command for the OWL Virchow2 data:
+
+```bash
+--data-format trident \
+--features-dirs /path/to/trident/virchow2_v001/20x_256px_0px_overlap/features_virchow2 \
+--input-dim 2560
+```
+
+For survival training, use `--head-type survival` and
+`--targets survival_continuous censorship` alongside your usual model, loss,
+and split options. `censorship=0` denotes an observed event.
+
+The format is saved in training arguments and inherited by testing and
+visualization; their `--data-format` option can explicitly override it.
+Training/testing/visualization array scripts expose the same option. Legacy
+inputs remain the default, including when loading older saved arguments.
+One format applies to all sources in a run.
+
+TRIDENT patch IDs are the original HDF5 row indices. Sampling retains these
+IDs and their matching features and positions. `positions_x/y` are integer grid
+indices derived from level-0 coordinates and patch stride (accounting for
+overlap); non-grid coordinates are rejected instead of silently mispositioned.
+Absolute positions and patch footprints are retained for heatmaps. Empty or
+mismatched bags are rejected. Annotation filters are unsupported because native
+TRIDENT files do not contain legacy patch annotations.
+
+Visualization reads top patches directly from the original WSI when using
+TRIDENT. Supply `--slides-dirs`; no exported patch JPEGs are needed. Patches are
+resized to the extraction size for display, not normalized encoder inputs.
+Use validated preprocessing outputs. This option does not change model
+architectures, survival discretization, or fold assignments.
+
+Install the updated requirements to include `h5py`. Focused adapter tests:
+
+```bash
+PYTHONPATH=src python -m pytest tests/test_trident.py
+# Optionally include a real Virchow2 feature file:
+TRIDENT_SAMPLE=/path/to/slide.h5 PYTHONPATH=src python -m pytest tests/test_trident.py
+```

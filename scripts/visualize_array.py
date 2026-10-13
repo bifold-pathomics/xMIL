@@ -41,6 +41,7 @@ def get_args():
     parser.add_argument("--split-path", type=str, default=None)
     parser.add_argument("--metadata-dirs", type=str, nargs="+", default=None)
     parser.add_argument("--patches-dirs", type=str, nargs="+", default=None)
+    parser.add_argument("--data-format", choices=["legacy", "trident"], default=None)
     parser.add_argument("--features-dirs", type=str, nargs="+", default=None)
 
     parser.add_argument(

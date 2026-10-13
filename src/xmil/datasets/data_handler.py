@@ -79,7 +79,48 @@ class MetadataHandler:
 class SlideDataHandler:
 
     @staticmethod
-    def load_patch_metadata(slide_metadata, patches_dirs, patch_filters):
+    def load_trident_metadata(path):
+        """Read HDF5 row IDs and spatial metadata in the existing patch-table schema."""
+        import h5py
+
+        with h5py.File(path, "r") as file:
+            coords = file["coords"][:]
+            attrs = dict(file["coords"].attrs)
+            shape = file["features"].shape
+        if coords.ndim != 2 or coords.shape[1] != 2:
+            raise ValueError(f"Invalid TRIDENT coordinate shape: {coords.shape}")
+        if len(shape) != 2 or shape[0] != len(coords) or min(shape) == 0:
+            raise ValueError(f"Empty or mismatched TRIDENT features: {path}")
+        if not np.isfinite(coords).all() or (coords < 0).any():
+            raise ValueError(f"Invalid TRIDENT coordinates: {path}")
+        footprint = float(attrs["patch_size_level0"])
+        patch_size = int(attrs["patch_size"])
+        stride = footprint * (1 - float(attrs.get("overlap", 0)) / patch_size)
+        if stride <= 0:
+            raise ValueError(f"Invalid TRIDENT patch spacing: {path}")
+        grid = np.rint(coords / stride).astype(np.int64)
+        if not np.allclose(grid * stride, coords, atol=1, rtol=0):
+            raise ValueError(
+                f"TRIDENT coordinates do not form the expected patch grid: {path}"
+            )
+        return pd.DataFrame(
+            {
+                "patch_id": np.arange(len(coords)),
+                "position_rel": [str(tuple(map(int, xy))) for xy in grid],
+                "position_abs": [str(tuple(map(int, xy))) for xy in coords],
+                "patch_size_rel": patch_size,
+                "patch_size_abs": footprint,
+            }
+        )
+
+    @staticmethod
+    def load_patch_metadata(
+        slide_metadata,
+        patches_dirs,
+        patch_filters,
+        data_format="legacy",
+        features_dirs=None,
+    ):
         """
         Loads patch metadata from the patch-level metadata frame for all given slides. Filters the patches according
         to the given filters.
@@ -93,19 +134,28 @@ class SlideDataHandler:
         :return: (list, list) Per slide: tensor of indices to filter the feature vectors per slide, tensor of patch ids.
             Ordered by the given slide barcodes.
         """
+        if data_format == "trident" and patch_filters:
+            raise ValueError(
+                "TRIDENT inputs do not contain patch annotations for filtering."
+            )
         print("Loading patch metadata")
         feature_indices, patch_ids, positions_x, positions_y = [], [], [], []
         for idx, row in tqdm(slide_metadata.iterrows(), total=len(slide_metadata)):
             source_id, slide_id = row[["source_id", "slide_id"]]
-            slide_patches = pd.read_csv(
-                os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
-                index_col=0,
-            )
+            if data_format == "trident":
+                slide_patches = SlideDataHandler.load_trident_metadata(
+                    os.path.join(features_dirs[source_id], f"{slide_id}.h5")
+                )
+            else:
+                slide_patches = pd.read_csv(
+                    os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
+                    index_col=0,
+                )
             slide_patches = slide_patches.sort_values("patch_id")
             slide_patches.insert(0, "slide_name", slide_id)
             slide_patches.insert(1, "feature_idx", range(len(slide_patches)))
             slide_patches = SlideDataHandler.filter_patches(
-                slide_patches, patch_filters
+                slide_patches, patch_filters if data_format == "legacy" else None
             )
             feature_indices.append(torch.tensor(slide_patches["feature_idx"].values))
             patch_ids.append(torch.tensor(slide_patches["patch_id"].values))
@@ -157,7 +207,7 @@ class SlideDataHandler:
         return patch_metadata
 
     @staticmethod
-    def load_features(path, feature_indices=None, patch_ids=None):
+    def load_features(path, feature_indices=None, patch_ids=None, data_format="legacy"):
         """
         Loads features of one slide into RAM. Pass feature_indices or patch ids to only load selected features.
 
@@ -166,6 +216,14 @@ class SlideDataHandler:
         :param patch_ids: (torch.Tensor) Selected patch IDs to load (for features saved in dict-style).
         :return: (torch.Tensor) The feature vectors of shape (num_patches, num_features).
         """
+        if data_format == "trident":
+            import h5py
+
+            with h5py.File(f"{path}.h5", "r") as file:
+                features = torch.from_numpy(file["features"][:]).float()
+            if feature_indices is not None:
+                features = features[feature_indices]
+            return features
         if os.path.exists(f"{path}.npz"):
             features = dict(np.load(f"{path}.npz"))
             keys, features = list(zip(*list(features.items())))

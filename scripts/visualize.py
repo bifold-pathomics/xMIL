@@ -43,6 +43,7 @@ def get_args():
     parser.add_argument("--split-path", type=str, default=None)
     parser.add_argument("--metadata-dirs", type=str, nargs="+", default=None)
     parser.add_argument("--patches-dirs", type=str, nargs="+", default=None)
+    parser.add_argument("--data-format", choices=["legacy", "trident"], default=None)
     parser.add_argument("--features-dirs", type=str, nargs="+", default=None)
     parser.add_argument(
         "--test-subsets",
@@ -163,7 +164,7 @@ def main(args=None):
         classifier=classifier,
         xmodel=xmodel,
         slides_dirs=args.slides_dirs,
-        patches_dirs=model_args["patches_dirs"],
+        patches_dirs=model_args.get("patches_dirs"),
         results_dir=args.results_dir,
         scores_df=df_predictions,
         annotations_dirs=args.annotations_dirs,

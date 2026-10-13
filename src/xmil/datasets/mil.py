@@ -34,12 +34,16 @@ class MILSlideDataset(Dataset):
         survival=False,
         survival_bins=None,
         reference_target=0,
+        data_format="legacy",
     ):
         super(MILSlideDataset, self).__init__()
         # Save args
         self.bag_size = bag_size
         self.num_repetitions = num_repetitions
         self.features_dirs = features_dirs
+        if data_format not in {"legacy", "trident"}:
+            raise ValueError(f"Unknown data format: {data_format}")
+        self.data_format = data_format
         self.label_cols = label_cols
         self.num_targets = len(self.label_cols)
         self.sort_sampled_patches = sort_sampled_patches
@@ -71,9 +75,16 @@ class MILSlideDataset(Dataset):
             for feat_dir in self.features_dirs
             for feat_file in os.listdir(feat_dir)
         ]
-        split_metadata = split_metadata[
-            split_metadata["slide_id"].isin(slides_ids)
-        ].reset_index(drop=True)
+        if data_format == "trident":
+            available = [
+                os.path.isfile(
+                    os.path.join(features_dirs[row.source_id], f"{row.slide_id}.h5")
+                )
+                for row in split_metadata.itertuples()
+            ]
+        else:
+            available = split_metadata["slide_id"].isin(slides_ids)
+        split_metadata = split_metadata[available].reset_index(drop=True)
         # Drop duplicates
         if drop_duplicates == "sample":
             split_metadata = split_metadata.drop_duplicates(
@@ -91,7 +102,11 @@ class MILSlideDataset(Dataset):
         # Load patch metadata and data
         self.feature_indices, self.patch_ids, self.positions_x, self.positions_y = (
             SlideDataHandler.load_patch_metadata(
-                self.split_metadata, patches_dirs, patch_filters
+                self.split_metadata,
+                patches_dirs,
+                patch_filters,
+                data_format=data_format,
+                features_dirs=features_dirs,
             )
         )
         # Drop bags with too many patches
@@ -127,7 +142,10 @@ class MILSlideDataset(Dataset):
                 features_path = os.path.join(self.features_dirs[source_id], slide_id)
                 self.features.append(
                     SlideDataHandler.load_features(
-                        features_path, self.feature_indices[idx], self.patch_ids[idx]
+                        features_path,
+                        self.feature_indices[idx],
+                        self.patch_ids[idx],
+                        data_format=self.data_format,
                     )
                 )
         else:
@@ -191,7 +209,10 @@ class MILSlideDataset(Dataset):
         if self.features is None:
             features_path = os.path.join(self.features_dirs[source_id], slide_id)
             features = SlideDataHandler.load_features(
-                features_path, self.feature_indices[idx], self.patch_ids[idx]
+                features_path,
+                self.feature_indices[idx],
+                self.patch_ids[idx],
+                data_format=self.data_format,
             )
         else:
             features = self.features[idx]

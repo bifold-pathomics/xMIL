@@ -12,6 +12,7 @@ from tqdm import tqdm
 from PIL import Image
 from matplotlib.backends.backend_pdf import PdfPages
 from copy import deepcopy
+from xmil.datasets.data_handler import SlideDataHandler
 from xmil.visualization.utils import convert2rgb, plot_colorbar, clean_outliers_fliers
 
 
@@ -38,7 +39,7 @@ def build_overlay(patches, size, patch_ids, slide_dim, overlay_rgb, background="
     for i, id_ in enumerate(patch_ids):
         this_patch = patches[patches["patch_id"] == id_]
         x_coord, y_coord = ast.literal_eval(this_patch["position_abs"].item())
-        patch_size = this_patch["patch_size_abs"]
+        patch_size = this_patch["patch_size_abs"].item()
         ds_x_coord = int(x_coord * (size[0] / slide_dim[0]))
         ds_y_coord = int(y_coord * (size[1] / slide_dim[1]))
         ds_patch_size_x = int(math.ceil(patch_size * (size[0] / slide_dim[0])))
@@ -315,6 +316,8 @@ def display_top_patches(
     rows=5,
     cols=5,
     figsize=(10, 10),
+    slide=None,
+    patch_metadata=None,
 ):
     """
     Display the top scored patches in a grid.
@@ -331,10 +334,21 @@ def display_top_patches(
     top_patch_idx = patch_scores.argsort()[::-1][:num_patches]
     top_patch_ids = patch_ids[top_patch_idx]
     top_patch_scores = patch_scores[top_patch_idx]
-    top_patch_imgs = [
-        Image.open(os.path.join(patches_dir, f"{patch_id}.jpg"))
-        for patch_id in top_patch_ids
-    ]
+    if slide is None:
+        top_patch_imgs = [
+            Image.open(os.path.join(patches_dir, f"{patch_id}.jpg"))
+            for patch_id in top_patch_ids
+        ]
+    else:
+        top_patch_imgs = []
+        patches = patch_metadata.set_index("patch_id")
+        for patch_id in top_patch_ids:
+            row = patches.loc[patch_id]
+            location = ast.literal_eval(row["position_abs"])
+            side = int(round(row["patch_size_abs"]))
+            size = int(row["patch_size_rel"])
+            image = slide.read_region(location, 0, (side, side)).convert("RGB")
+            top_patch_imgs.append(image.resize((size, size)))
     fig = display_patches_in_grid(
         top_patch_imgs, rows, cols, figsize, titles=top_patch_scores
     )
@@ -464,12 +478,13 @@ def create_visualization_pdf(
 
             zero_centered = xmodel.get_heatmap_zero_centered(heatmap_type)
 
-            patch_scores, _ = clean_outliers_fliers(patch_scores)
-
             patch_ids = batch["patch_ids"].numpy().ravel()
+            patch_scores = np.asarray(patch_scores).reshape(-1)
+            valid = patch_ids >= 0  # Padding has no corresponding slide region.
+            patch_ids, patch_scores = patch_ids[valid], patch_scores[valid]
+            patch_scores, _ = clean_outliers_fliers(patch_scores)
             pred_score = preds[0, -1]
             target = targets[0]
-            patch_scores = patch_scores.squeeze()
             source_id, slide_id = (
                 pred_metadata["source_id"][0],
                 pred_metadata["slide_id"][0],
@@ -485,10 +500,17 @@ def create_visualization_pdf(
             slide = openslide.open_slide(
                 os.path.join(slides_dirs[source_id], slide_file)
             )
-            patches_this_slide = pd.read_csv(
-                os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
-                index_col=0,
-            )
+            dataset = data_loader.dataset
+            is_trident = getattr(dataset, "data_format", "legacy") == "trident"
+            if is_trident:
+                patches_this_slide = SlideDataHandler.load_trident_metadata(
+                    os.path.join(dataset.features_dirs[source_id], f"{slide_id}.h5")
+                )
+            else:
+                patches_this_slide = pd.read_csv(
+                    os.path.join(patches_dirs[source_id], slide_id, "metadata/df.csv"),
+                    index_col=0,
+                )
 
             if annotations_dirs is not None and show_annotations:
                 slide_anno = openslide.open_slide(
@@ -525,7 +547,13 @@ def create_visualization_pdf(
                 fig, _ = display_top_patches(
                     patch_ids,
                     patch_scores,
-                    os.path.join(patches_dirs[source_id], slide_id),
+                    (
+                        None
+                        if is_trident
+                        else os.path.join(patches_dirs[source_id], slide_id)
+                    ),
+                    slide=slide if is_trident else None,
+                    patch_metadata=patches_this_slide if is_trident else None,
                 )
                 pdf.savefig(fig)
                 plt.close(fig)
