@@ -486,7 +486,9 @@ def create_visualization_pdf(
                     & (scores_df["slide_id"] == batch["sample_ids"]["slide_id"][0])
                 ]
                 if len(df_this_slide) != 1:
-                    raise ValueError("Expected one saved prediction row per slide/source.")
+                    raise ValueError(
+                        "Expected one saved prediction row per slide/source."
+                    )
                 patch_ids, patch_scores = load_saved_patch_scores(
                     df_this_slide.iloc[0], heatmap_type
                 )
