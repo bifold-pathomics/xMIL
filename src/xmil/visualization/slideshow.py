@@ -16,6 +16,23 @@ from xmil.datasets.data_handler import SlideDataHandler
 from xmil.visualization.utils import convert2rgb, plot_colorbar, clean_outliers_fliers
 
 
+def load_saved_patch_scores(row, heatmap_type):
+    """Read test CSV scores paired with their original HDF5 row IDs."""
+    patch_ids = np.asarray(json.loads(row["patch_ids"])).reshape(-1)
+    scores = np.asarray(json.loads(row[f"patch_scores_{heatmap_type}"])).reshape(-1)
+    if len(patch_ids) != len(scores):
+        raise ValueError("Saved patch IDs and scores have different lengths.")
+    if not np.isfinite(scores).all() or not np.isfinite(patch_ids).all():
+        raise ValueError("Saved patch IDs and scores must be finite.")
+    if not np.equal(patch_ids, patch_ids.astype(int)).all():
+        raise ValueError("Saved patch IDs must be integers.")
+    valid = patch_ids >= 0  # Negative IDs represent padding, not slide regions.
+    patch_ids, scores = patch_ids[valid].astype(int), scores[valid]
+    if not len(patch_ids) or len(np.unique(patch_ids)) != len(patch_ids):
+        raise ValueError("Saved scores need nonempty, unique patch IDs.")
+    return patch_ids, scores
+
+
 def build_overlay(patches, size, patch_ids, slide_dim, overlay_rgb, background="black"):
     """
     (c) modified from https://github.com/hense96/patho-preprocessing
@@ -460,7 +477,6 @@ def create_visualization_pdf(
         for batch in tqdm(data_loader):
 
             preds, targets, loss, pred_metadata = classifier.validation_step(batch)
-            n_patches = batch["bag_size"].item()
             if scores_df is not None:
                 df_this_slide = scores_df[
                     (
@@ -469,22 +485,27 @@ def create_visualization_pdf(
                     )
                     & (scores_df["slide_id"] == batch["sample_ids"]["slide_id"][0])
                 ]
-                patch_scores = np.array(
-                    json.loads(df_this_slide[f"patch_scores_{heatmap_type}"].item())
+                if len(df_this_slide) != 1:
+                    raise ValueError("Expected one saved prediction row per slide/source.")
+                patch_ids, patch_scores = load_saved_patch_scores(
+                    df_this_slide.iloc[0], heatmap_type
                 )
-                patch_scores = patch_scores[-n_patches:]
             else:
                 patch_scores = xmodel.get_heatmap(batch, heatmap_type, verbose)
+                patch_ids = batch["patch_ids"].numpy().ravel()
 
             zero_centered = xmodel.get_heatmap_zero_centered(heatmap_type)
 
-            patch_ids = batch["patch_ids"].numpy().ravel()
             patch_scores = np.asarray(patch_scores).reshape(-1)
             valid = patch_ids >= 0  # Padding has no corresponding slide region.
             patch_ids, patch_scores = patch_ids[valid], patch_scores[valid]
             patch_scores, _ = clean_outliers_fliers(patch_scores)
-            pred_score = preds[0, -1]
-            target = targets[0]
+            if isinstance(preds, tuple):
+                pred_score = preds[2][0].reshape(-1)  # Survival risk score.
+                target = [value[0].item() for value in targets]
+            else:
+                pred_score = preds[0, -1]
+                target = targets[0].tolist()
             source_id, slide_id = (
                 pred_metadata["source_id"][0],
                 pred_metadata["slide_id"][0],
@@ -519,7 +540,7 @@ def create_visualization_pdf(
             else:
                 slide_anno = None
 
-            label_print = target.tolist() if print_label else None
+            label_print = target if print_label else None
 
             # Create overlay heatmap
             fig = slide_heatmap_thumbnail(
