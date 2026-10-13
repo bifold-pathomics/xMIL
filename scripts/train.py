@@ -335,6 +335,7 @@ def main(args=None):
         path_checkpoints=save_dir,
         stop_criterion=args.stop_criterion,
         early_stop=args.early_stopping,
+        warmup_epoch=args.warmup,
     )
 
     learner = TrainTestExecutor(

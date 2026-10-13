@@ -666,7 +666,7 @@ def train_survival_model(
         # region save checkpoint and check early stopping ---------------------------
         if (
             not i_epoch % callback.checkpoint_epoch or i_epoch == n_epochs - 1
-        ) and i_epoch > callback.warmup_epoch:
+        ) and i_epoch >= callback.warmup_epoch:
             performance, best_model = callback.save_checkpoint_survival(
                 i_epoch,
                 c_index_all_train,
