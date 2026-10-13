@@ -12,9 +12,12 @@ From: continuumio/miniconda3
 %post
     chmod 1777 /tmp # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
 
-    # openslide-tools for openslide-python
-    apt update -y
-    apt install openslide-tools -y
+    # OpenSlide and tools/libraries for compiling packages
+    apt-get update && apt-get install -y --no-install-recommends \
+        openslide-tools \
+        build-essential cmake gfortran \
+        libopenblas-dev liblapack-dev pkg-config git \
+        && rm -rf /var/lib/apt/lists/*
 
     conda update -n base -c defaults conda -y
     conda create -n myenv python=3.10
