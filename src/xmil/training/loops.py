@@ -557,7 +557,7 @@ def train_survival_model(
 
         c_index_train = concordance_index_censored(
             all_censorships_tr == 0,
-            all_true_survivals_tr,
+            all_true_survivals_cont_tr,
             all_pred_risks_tr,
             tied_tol=1e-8,
         )[0]
@@ -637,7 +637,7 @@ def train_survival_model(
 
             c_index_val = concordance_index_censored(
                 all_censorships_val == 0,
-                all_true_survivals_val,
+                all_true_survivals_cont_val,
                 all_pred_risks_val,
                 tied_tol=1e-8,
             )[0]
@@ -970,7 +970,7 @@ def test_survival_model(
     all_true_survivals_cont = torch.concat(all_true_survivals_cont).cpu().numpy()
 
     c_index_test = concordance_index_censored(
-        all_censorships == 0, all_true_survivals, all_pred_risks, tied_tol=1e-8
+        all_censorships == 0, all_true_survivals_cont, all_pred_risks, tied_tol=1e-8
     )[0]
 
     if verbose:

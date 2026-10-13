@@ -104,6 +104,13 @@ class Callback:
         if self.stop_criterion != "loss":
             if head_type == "survival":
                 model_val_perf = np.mean([perf_metric_val])
+                if not np.isfinite(model_val_perf):
+                    raise ValueError(
+                        f"Cannot select a best survival checkpoint at epoch {i_epoch}: "
+                        f"validation C-index is {model_val_perf}. "
+                        "Check validation survival times, censorship labels, and comparable pairs. "
+                        "Use --stop-criterion loss if selecting by validation loss is intended."
+                    )
                 best_val_perf = np.mean([best_model["perf_metric_val"]])
             else:
                 if head_type == "classification":
