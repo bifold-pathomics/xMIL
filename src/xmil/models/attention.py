@@ -213,7 +213,8 @@ class Attention(nn.Module):
                 out = self.attn_scores @ v
             else:
                 # this if case shall be used in xai mode
-                out = (attn1 @ attn2_inv @ attn3).detach() @ v
+                # same as (attn1 @ attn2_inv @ attn3).detach() @ v, without the n x n attention matrix
+                out = (attn1 @ attn2_inv).detach() @ (attn3.detach() @ v)
         else:  # dot-prod attention
             if not xai_mode and not save_attn:
                 # this if case shall be used for the usual forward pass in training
