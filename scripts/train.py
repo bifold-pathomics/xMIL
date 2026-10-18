@@ -236,7 +236,9 @@ def get_args():
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--stop-criterion", type=str, default="loss")
     parser.add_argument(
-        "--perf-window-size", type=int, default=5,
+        "--perf-window-size",
+        type=int,
+        default=5,
         help="Number of validation evaluations in survival performance/loss windows. "
         "Use --stop-criterion perf_window_mean to select by mean C-index.",
     )
@@ -273,7 +275,9 @@ def main(args=None):
         raise ValueError("--perf-window-size must be at least 1.")
     if args.stop_criterion == "perf_window_mean":
         if args.head_type != "survival":
-            raise ValueError("perf_window_mean currently supports survival models only.")
+            raise ValueError(
+                "perf_window_mean currently supports survival models only."
+            )
         validation_epochs = list(range(0, args.num_epochs, args.val_interval))
         if validation_epochs and validation_epochs[-1] != args.num_epochs - 1:
             validation_epochs.append(args.num_epochs - 1)

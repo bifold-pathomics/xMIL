@@ -91,10 +91,12 @@ class Callback:
         """Trailing full-window statistics; std uses ddof=0 (population std)."""
         if len(performance) < self.perf_window_size:
             return {}
-        values = np.asarray(performance[-self.perf_window_size:])
-        loss_values = np.asarray(losses[-self.perf_window_size:])
+        values = np.asarray(performance[-self.perf_window_size :])
+        loss_values = np.asarray(losses[-self.perf_window_size :])
         if not np.isfinite(values).all() or not np.isfinite(loss_values).all():
-            raise ValueError("Validation window contains nonfinite performance or loss.")
+            raise ValueError(
+                "Validation window contains nonfinite performance or loss."
+            )
         return {
             "perf_window_mean": float(np.mean(values)),
             "perf_window_std": float(np.std(values)),
@@ -114,7 +116,9 @@ class Callback:
     ):
         if self.stop_criterion == "perf_window_mean":
             if head_type != "survival":
-                raise ValueError("perf_window_mean currently supports survival models only.")
+                raise ValueError(
+                    "perf_window_mean currently supports survival models only."
+                )
             if perf_window_mean is None:
                 return best_model, False  # No full window yet; do not count patience.
 
@@ -454,7 +458,10 @@ class Callback:
                         **{
                             name: window[key]
                             for key, name in (
-                                ("perf_window_mean", "C-Index/val_window_mean.selected"),
+                                (
+                                    "perf_window_mean",
+                                    "C-Index/val_window_mean.selected",
+                                ),
                                 ("perf_window_std", "C-Index/val_window_std.selected"),
                                 ("loss_window_mean", "loss/val_window_mean.selected"),
                             )

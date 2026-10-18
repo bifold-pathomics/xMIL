@@ -245,7 +245,9 @@ def get_args():
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--stop-criterion", type=str, default="loss")
     parser.add_argument(
-        "--perf-window-size", type=int, default=5,
+        "--perf-window-size",
+        type=int,
+        default=5,
         help="Number of validation evaluations in survival performance/loss windows. "
         "Use --stop-criterion perf_window_mean to select by mean C-index.",
     )
