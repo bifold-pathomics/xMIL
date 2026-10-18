@@ -244,6 +244,11 @@ def get_args():
     parser.add_argument("--val-interval", type=int, default=1)
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--stop-criterion", type=str, default="loss")
+    parser.add_argument(
+        "--perf-window-size", type=int, default=5,
+        help="Number of validation evaluations in survival performance/loss windows. "
+        "Use --stop-criterion perf_window_mean to select by mean C-index.",
+    )
     parser.add_argument("--optimizer", type=str, nargs="+", default=["SGD"])
     parser.add_argument("--grad-clip", type=float, nargs="+", default=[None])
     parser.add_argument("--warmup", type=int, default=0)

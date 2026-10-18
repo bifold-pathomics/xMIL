@@ -267,3 +267,41 @@ coordinates, and source files unchanged. It requires the HDF5 encoder attribute
 `virchow2` and 2560 input columns. Testing and visualization inherit the saved
 training setting; use the matching trained model for each experiment. Older
 runs without the option continue to use all feature dimensions.
+
+
+### Survival checkpoint selection with validation windows
+
+Both `scripts/train.py` and `scripts/train_array.py` accept:
+
+```bash
+--stop-criterion perf_window_mean --perf-window-size 5
+```
+
+The window contains the latest five **validation evaluations**, including the
+current one. Once a complete window exists and warmup has ended, the checkpoint
+at the window endpoint is selected by its mean validation C-index (higher is
+better; ties select the later checkpoint). Window std uses `ddof=0`; neither std
+nor loss influences checkpoint selection. Windows may include warmup evaluations.
+The final epoch is also validated, even when it is outside `--val-interval`.
+A run too short to form a full window is rejected before training.
+
+This criterion currently supports survival models. Existing `loss` and
+`perf_metric` selection rules remain available; the default window size is 5.
+
+Raw validation curves retain their existing names. After each full window,
+additional curves are logged as `C-Index/val_window_mean`,
+`C-Index/val_window_std`, and `loss/val_window_mean`. When a best checkpoint is
+saved, its matching W&B summary fields are:
+
+- `C-Index/val.selected`: actual endpoint C-index.
+- `loss/val.selected`: actual endpoint loss.
+- `epoch/selected`: endpoint epoch, zero-based.
+- `C-Index/val_window_mean.selected`: mean C-index in its window.
+- `C-Index/val_window_std.selected`: C-index std in its window.
+- `loss/val_window_mean.selected`: mean loss in its window.
+
+The best/last checkpoint dictionaries store `perf_window_mean`,
+`perf_window_std`, `loss_window_mean`, and `perf_window_size` when available.
+Summary fields are not retroactively added to existing runs. When comparing HPO
+configurations using window loss, use the same window size, loss definition,
+and validation schedule. No coefficient-of-variation selection is implemented.

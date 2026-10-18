@@ -235,6 +235,11 @@ def get_args():
     parser.add_argument("--val-interval", type=int, default=1)
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--stop-criterion", type=str, default="loss")
+    parser.add_argument(
+        "--perf-window-size", type=int, default=5,
+        help="Number of validation evaluations in survival performance/loss windows. "
+        "Use --stop-criterion perf_window_mean to select by mean C-index.",
+    )
     parser.add_argument("--optimizer", type=str, default="SGD")
     parser.add_argument("--grad-clip", type=float, default=None)
     parser.add_argument("--warmup", type=int, default=0)
@@ -264,6 +269,21 @@ def get_args():
 def main(args=None):
     # Process args and create file structures
     args = get_args() if args is None else args
+    if args.perf_window_size < 1:
+        raise ValueError("--perf-window-size must be at least 1.")
+    if args.stop_criterion == "perf_window_mean":
+        if args.head_type != "survival":
+            raise ValueError("perf_window_mean currently supports survival models only.")
+        validation_epochs = list(range(0, args.num_epochs, args.val_interval))
+        if validation_epochs and validation_epochs[-1] != args.num_epochs - 1:
+            validation_epochs.append(args.num_epochs - 1)
+        if len(validation_epochs) < args.perf_window_size:
+            raise ValueError(
+                "Not enough validation evaluations for --perf-window-size. "
+                "Reduce the window or increase --num-epochs."
+            )
+        if validation_epochs[-1] < args.warmup:
+            raise ValueError("Warmup leaves no eligible checkpoint selection epoch.")
 
     print(json.dumps(vars(args), indent=4))
     timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
@@ -336,6 +356,7 @@ def main(args=None):
         stop_criterion=args.stop_criterion,
         early_stop=args.early_stopping,
         warmup_epoch=args.warmup,
+        perf_window_size=args.perf_window_size,
     )
 
     learner = TrainTestExecutor(

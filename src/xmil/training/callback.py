@@ -22,6 +22,7 @@ class Callback:
         device="cpu",
         results_dir=None,
         warmup_epoch=0,
+        perf_window_size=5,
     ):
         self.schedule_lr = schedule_lr
         self.checkpoint_epoch = checkpoint_epoch
@@ -36,6 +37,9 @@ class Callback:
         self.device = device
         self.results_dir = results_dir if results_dir is not None else path_checkpoints
         self.warmup_epoch = warmup_epoch
+        if perf_window_size < 1:
+            raise ValueError("perf_window_size must be at least 1.")
+        self.perf_window_size = perf_window_size
 
     def lr_schedule(self, optimizer, current_epoch_num, lr_init):
         if self.schedule_lr:
@@ -83,6 +87,20 @@ class Callback:
             if val is not None:
                 logger.log_scalar(f"{key}/{subset}", val, step)
 
+    def get_performance_window(self, performance, losses):
+        """Trailing full-window statistics; std uses ddof=0 (population std)."""
+        if len(performance) < self.perf_window_size:
+            return {}
+        values = np.asarray(performance[-self.perf_window_size:])
+        loss_values = np.asarray(losses[-self.perf_window_size:])
+        if not np.isfinite(values).all() or not np.isfinite(loss_values).all():
+            raise ValueError("Validation window contains nonfinite performance or loss.")
+        return {
+            "perf_window_mean": float(np.mean(values)),
+            "perf_window_std": float(np.std(values)),
+            "loss_window_mean": float(np.mean(loss_values)),
+        }
+
     def get_best_model(
         self,
         best_model,
@@ -92,7 +110,14 @@ class Callback:
         loss_val,
         perf_metric_val,
         head_type,
+        perf_window_mean=None,
     ):
+        if self.stop_criterion == "perf_window_mean":
+            if head_type != "survival":
+                raise ValueError("perf_window_mean currently supports survival models only.")
+            if perf_window_mean is None:
+                return best_model, False  # No full window yet; do not count patience.
+
         # get best model via loss
         better_model_loss = (
             self.stop_criterion == "loss" and loss_val <= best_model["loss_val"]
@@ -112,6 +137,9 @@ class Callback:
                         "Use --stop-criterion loss if selecting by validation loss is intended."
                     )
                 best_val_perf = np.mean([best_model["perf_metric_val"]])
+                if self.stop_criterion == "perf_window_mean":
+                    model_val_perf = perf_window_mean
+                    best_val_perf = best_model.get("perf_window_mean", -np.inf)
             else:
                 if head_type == "classification":
                     if self.stop_criterion == "perf_metric":
@@ -399,6 +427,7 @@ class Callback:
         performance["all_true_survivals_cont_tr"] = all_true_survivals_cont_tr
         performance["all_true_survivals_cont_val"] = all_true_survivals_cont_val
 
+        window = self.get_performance_window(c_index_epoch_val, loss_epoch_val)
         best_model, better_model = self.get_best_model(
             best_model,
             model_state_dict,
@@ -407,8 +436,11 @@ class Callback:
             loss_epoch_val[-1],
             c_index_epoch_val[-1],
             head_type="survival",
+            perf_window_mean=window.get("perf_window_mean"),
         )
         if better_model:
+            best_model.update(window)
+            best_model["perf_window_size"] = self.perf_window_size
             torch.save(best_model, os.path.join(self.path_checkpoints, "best_model.pt"))
             torch.save(
                 performance, os.path.join(self.path_checkpoints, f"best_performance.pt")
@@ -419,6 +451,15 @@ class Callback:
                         "C-Index/val.selected": float(best_model["perf_metric_val"]),
                         "loss/val.selected": float(best_model["loss_val"]),
                         "epoch/selected": int(best_model["epoch"]),
+                        **{
+                            name: window[key]
+                            for key, name in (
+                                ("perf_window_mean", "C-Index/val_window_mean.selected"),
+                                ("perf_window_std", "C-Index/val_window_std.selected"),
+                                ("loss_window_mean", "loss/val_window_mean.selected"),
+                            )
+                            if key in window
+                        },
                     }
                 )
 
@@ -430,6 +471,8 @@ class Callback:
                 loss_epoch_val[-1],
                 c_index_epoch_val[-1],
             )
+            last_model.update(window)
+            last_model["perf_window_size"] = self.perf_window_size
             torch.save(last_model, os.path.join(self.path_checkpoints, "last_model.pt"))
             torch.save(
                 performance, os.path.join(self.path_checkpoints, f"last_performance.pt")

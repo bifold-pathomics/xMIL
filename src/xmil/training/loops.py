@@ -596,7 +596,7 @@ def train_survival_model(
             [],
             [],
         )
-        if not i_epoch % n_epoch_val:  # validation for every {n_epoch_val} epochs
+        if not i_epoch % n_epoch_val or i_epoch == n_epochs - 1:
             for i_batch, batch in enumerate(dataloader_val):
                 preds, targets, loss, _ = classifier.validation_step(batch)
                 pred_hazard_probs, pred_survival_probs, pred_risk_scores = preds
@@ -644,6 +644,15 @@ def train_survival_model(
             callback.collect_metric(
                 loss_epoch_val, loss_val, c_index_epoch_val, c_index_val
             )
+            window = callback.get_performance_window(c_index_epoch_val, loss_epoch_val)
+            if logger is not None:
+                for key, name in (
+                    ("perf_window_mean", "C-Index/val_window_mean"),
+                    ("perf_window_std", "C-Index/val_window_std"),
+                    ("loss_window_mean", "loss/val_window_mean"),
+                ):
+                    if key in window:
+                        logger.log_scalar(name, window[key], i_epoch)
 
             if verbose:
                 print(f"Epoch {i_epoch}: validation loss= {loss_val}")
